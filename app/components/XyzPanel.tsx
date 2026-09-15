@@ -2,6 +2,7 @@
 
 import type { Job } from "@/shared/schemas/job"
 import { parseXyzFrames, frameToXyz, minEnergyFrame } from "@/lib/xyz"
+import { downloadText, safeFileBase } from "@/lib/download"
 import Button from "@/app/components/ui/Button"
 
 export interface XyzPanelProps {
@@ -12,13 +13,7 @@ export interface XyzPanelProps {
 
 export default function XyzPanel({ cur, fallbackXyz, onUseFrame }: XyzPanelProps) {
   const download = () => {
-    if (!cur) return
-    const t = cur.result_xyz || cur.input_xyz || ""
-    const b = new Blob([t], { type: "text/plain" })
-    const a = document.createElement("a")
-    a.href = URL.createObjectURL(b)
-    a.download = cur.id + ".xyz"
-    a.click()
+    if (cur) downloadText(`${safeFileBase(cur.name || cur.id)}.xyz`, cur.result_xyz || cur.input_xyz || "")
   }
 
   const traj = cur ? parseXyzFrames(cur.result_xyz || "") : []

@@ -1,28 +1,18 @@
 "use client"
 
-// 任务列表（侧边栏）与任务页（主区）共用的小组件、常量与筛选
+// 任务列表（侧边栏）与任务页（主区）共用的小组件与选项
 import { useEffect, useRef } from "react"
-import type { JobListItem, JobStatus } from "@/shared/schemas/job"
+import type { JobListItem } from "@/shared/schemas/job"
 import { createdMs, type GroupBy, type GroupCounts, type SortBy } from "@/lib/jobGroups"
-
-export type StatusFilter = "all" | JobStatus
+import { METHODS, STATUS_FILTER_LABEL, TONE_BADGE, TONE_BAR, TONE_TEXT, statusTone, type StatusTone } from "@/lib/jobMeta"
+import type { StatusFilter } from "@/lib/hooks/useJobOrganizer"
 
 export const STATUS_CHIPS: { key: StatusFilter; label: string }[] = [
   { key: "all", label: "全部" },
-  { key: "running", label: "运行中" },
-  { key: "done", label: "已完成" },
-  { key: "failed", label: "失败" },
-  { key: "cancelled", label: "已取消" },
+  ...(Object.entries(STATUS_FILTER_LABEL) as [StatusFilter, string][]).map(([key, label]) => ({ key, label })),
 ]
 
-export const METHODS: { key: string; label: string }[] = [
-  { key: "all", label: "全部方法" },
-  { key: "gfn2", label: "GFN2" },
-  { key: "gfn1", label: "GFN1" },
-  { key: "gfnff", label: "GFN-FF" },
-  { key: "uff", label: "UFF" },
-  { key: "psi4", label: "psi4" },
-]
+export const METHOD_FILTERS: { key: string; label: string }[] = [{ key: "all", label: "全部方法" }, ...METHODS.map((m) => ({ key: m.key as string, label: m.short }))]
 
 export const GROUP_OPTIONS: { key: GroupBy; label: string }[] = [
   { key: "batch", label: "按批次" },
@@ -38,27 +28,6 @@ export const SORT_OPTIONS: { key: SortBy; label: string }[] = [
   { key: "name", label: "名称" },
 ]
 
-export const TERMINAL = ["done", "failed", "cancelled"]
-
-export const isLive = (j: JobListItem) => j.status === "running" || j.status === "queued"
-
-export function filterJobs(source: JobListItem[], statusF: StatusFilter, methodF: string, query: string): JobListItem[] {
-  const q = query.trim().toLowerCase()
-  return source.filter(
-    (j) =>
-      (statusF === "all" || j.status === statusF || (statusF === "running" && j.status === "queued")) &&
-      (methodF === "all" || (j.method || "gfn2") === methodF) &&
-      (q === "" ||
-        j.id.toLowerCase().includes(q) ||
-        (j.name || "").toLowerCase().includes(q) ||
-        (j.task || "").toLowerCase().includes(q) ||
-        (j.method || "").toLowerCase().includes(q)),
-  )
-}
-
-export const countByStatus = (source: JobListItem[], s: StatusFilter) =>
-  s === "all" ? source.length : source.filter((j) => j.status === s || (s === "running" && j.status === "queued")).length
-
 /** 运行中耗时文案：Xs / X分Y秒；时钟 skew 为负则显示"刚刚" */
 export function elapsedText(createdAt: string, now: number): string {
   const dt = Math.floor((now - createdMs(createdAt)) / 1000)
@@ -67,25 +36,12 @@ export function elapsedText(createdAt: string, now: number): string {
   return `${Math.floor(dt / 60)}分${dt % 60}秒`
 }
 
-export function statusColor(status: string): "green" | "yellow" | "red" | "gray" {
-  if (status === "done") return "green"
-  if (status === "running" || status === "queued") return "yellow"
-  if (status === "failed") return "red"
-  return "gray"
+export function Badge({ children, tone = "gray" }: { children: React.ReactNode; tone?: StatusTone }) {
+  return <span className={`px-2 py-0.5 rounded-full text-xs whitespace-nowrap ${TONE_BADGE[tone]}`}>{children}</span>
 }
 
-export function Badge({ children, color = "gray" }: { children: React.ReactNode; color?: "green" | "blue" | "yellow" | "gray" | "red" }) {
-  const c =
-    color === "green"
-      ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"
-      : color === "blue"
-        ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300"
-        : color === "yellow"
-          ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300"
-          : color === "red"
-            ? "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300"
-            : "bg-gray-100 text-gray-700 dark:bg-zinc-800 dark:text-zinc-300"
-  return <span className={`px-2 py-0.5 rounded-full text-xs whitespace-nowrap ${c}`}>{children}</span>
+export function StatusBadge({ status }: { status: string }) {
+  return <Badge tone={statusTone(status)}>{status}</Badge>
 }
 
 export function JobName({ j, className }: { j: JobListItem; className: string }) {
@@ -99,10 +55,10 @@ export function JobName({ j, className }: { j: JobListItem; className: string })
 export function CountsText({ counts }: { counts: GroupCounts }) {
   return (
     <span className="truncate">
-      {counts.done > 0 && <span className="text-green-600">{counts.done} 完成 </span>}
-      {counts.running > 0 && <span className="text-yellow-600">{counts.running} 运行 </span>}
-      {counts.failed > 0 && <span className="text-red-600">{counts.failed} 失败 </span>}
-      {counts.cancelled > 0 && <span className="text-zinc-500">{counts.cancelled} 取消</span>}
+      {counts.done > 0 && <span className={TONE_TEXT.green}>{counts.done} 完成 </span>}
+      {counts.running > 0 && <span className={TONE_TEXT.yellow}>{counts.running} 运行 </span>}
+      {counts.failed > 0 && <span className={TONE_TEXT.red}>{counts.failed} 失败 </span>}
+      {counts.cancelled > 0 && <span className={TONE_TEXT.gray}>{counts.cancelled} 取消</span>}
     </span>
   )
 }
@@ -111,10 +67,10 @@ export function ProgressBar({ counts, total, className }: { counts: GroupCounts;
   const pct = (n: number) => `${total ? (n / total) * 100 : 0}%`
   return (
     <div className={`rounded-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden flex ${className}`}>
-      <div className="bg-green-500" style={{ width: pct(counts.done) }} />
-      <div className="bg-red-500" style={{ width: pct(counts.failed) }} />
-      <div className="bg-zinc-400" style={{ width: pct(counts.cancelled) }} />
-      <div className="bg-yellow-400" style={{ width: pct(counts.running) }} />
+      <div className={TONE_BAR.green} style={{ width: pct(counts.done) }} />
+      <div className={TONE_BAR.red} style={{ width: pct(counts.failed) }} />
+      <div className={TONE_BAR.gray} style={{ width: pct(counts.cancelled) }} />
+      <div className={TONE_BAR.yellow} style={{ width: pct(counts.running) }} />
     </div>
   )
 }
@@ -172,10 +128,4 @@ export function LoadMore({ remaining, onMore }: { remaining: number; onMore: () 
       </button>
     </div>
   )
-}
-
-/** 分组折叠偏好：key = groupBy|groupKey；只保留最近 200 个已折叠项 */
-export const collapseKey = (groupBy: GroupBy, key: string) => `${groupBy}|${key}`
-export function pruneCollapsed<T extends { collapsed: Record<string, boolean> }>(p: T): T {
-  return { ...p, collapsed: Object.fromEntries(Object.entries(p.collapsed).filter(([, v]) => v).slice(-200)) }
 }

@@ -1,6 +1,7 @@
 "use client"
 
 import type { Job } from "@/shared/schemas/job"
+import { energyUnit } from "@/lib/jobMeta"
 
 export interface LogPanelProps {
   cur: Job | null
@@ -15,7 +16,7 @@ export default function LogPanel({ cur }: LogPanelProps) {
       {cur ? (
         <>
           <div className="text-xs bg-zinc-50 dark:bg-zinc-800 p-2 rounded mb-2 font-mono">
-            E = {cur.result_energy ?? cur.progress_energy ?? "…"} {cur.method === "uff" ? "kcal/mol" : "Eh"}{cur.result_energy == null && cur.progress_energy != null && " (live)"} · wall {cur.wall_time?.toFixed(2) ?? "…"}s · {cur.status} · {cur.method || "gfn2"}{cur.method === "psi4" && ` ${cur.psi_method || "b3lyp"}/${cur.psi_basis || "def2-SVP"} ×${cur.multiplicity || 1}`}
+            E = {cur.result_energy ?? cur.progress_energy ?? "…"} {energyUnit(cur.method)}{cur.result_energy == null && cur.progress_energy != null && " (live)"} · wall {cur.wall_time?.toFixed(2) ?? "…"}s · {cur.status} · {cur.method || "gfn2"}{cur.method === "psi4" && ` ${cur.psi_method || "b3lyp"}/${cur.psi_basis || "def2-SVP"} ×${cur.multiplicity || 1}`}
           </div>
           <pre className="bg-zinc-900 text-zinc-100 p-3 rounded-lg text-xs overflow-auto max-h-[420px]">
             {cur.result_log?.slice(-8000) || "无日志"}

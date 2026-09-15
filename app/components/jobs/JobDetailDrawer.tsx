@@ -8,17 +8,17 @@ import { useJobStream } from "@/lib/hooks/useJobStream"
 import { isTrajectoryTask } from "@/lib/xyz"
 import { createdMs } from "@/lib/jobGroups"
 import { downloadText, safeFileBase } from "@/lib/download"
-import MiniViewer from "@/app/components/jobs/MiniViewer"
-import { Badge, elapsedText, statusColor } from "@/app/components/jobs/JobBits"
+import { energyUnit, isTerminal } from "@/lib/jobMeta"
+import MolViewer from "@/app/components/mol/MolViewer"
+import { StatusBadge, elapsedText } from "@/app/components/jobs/JobBits"
 
-const TERMINAL = ["done", "failed", "cancelled"]
 const LOG_TAIL = 3000
 
 // 终态任务详情缓存：上下切换时不重复拉取（opt 轨迹可达数百 KB）
 const cache = new Map<string, Job>()
 const CACHE_MAX = 30
 function remember(j: Job) {
-  if (!TERMINAL.includes(j.status)) return
+  if (!isTerminal(j.status)) return
   cache.delete(j.id)
   cache.set(j.id, j)
   while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value as string)
@@ -127,7 +127,7 @@ export default function JobDetailDrawer(p: JobDetailDrawerProps) {
   const st = job?.status || p.item?.status || "queued"
   const name = job?.name || p.item?.name || p.jobId.slice(0, 8)
   const method = job?.method || p.item?.method || "gfn2"
-  const unit = method === "uff" ? "kcal/mol" : "Eh"
+  const unit = energyUnit(method)
   const xyz = job ? job.result_xyz || (isTrajectoryTask(job.task) ? job.progress_xyz : null) || job.input_xyz || "" : ""
   const natoms = parseInt((job?.input_xyz || "").split("\n")[0]) || null
   const energy = job?.result_energy ?? p.item?.result_energy
@@ -150,7 +150,7 @@ export default function JobDetailDrawer(p: JobDetailDrawerProps) {
               <span className="font-mono font-semibold text-sm truncate" title={name}>
                 {name}
               </span>
-              <Badge color={statusColor(st)}>{st}</Badge>
+              <StatusBadge status={st} />
             </div>
             <div className="text-[11px] text-zinc-400 font-mono select-all">{p.jobId}</div>
           </div>
@@ -206,7 +206,7 @@ export default function JobDetailDrawer(p: JobDetailDrawerProps) {
 
           {err && <div className="text-xs text-red-600">{err}</div>}
 
-          <MiniViewer xyz={xyz} loading={!job && !err} />
+          <MolViewer xyz={xyz} controls="compact" emptyText={!job && !err ? "加载中…" : "无结构"} />
 
           <dl className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1.5 text-xs">
             <dt className="text-zinc-500">能量</dt>

@@ -1,59 +1,30 @@
 "use client"
 
 // 侧边栏任务列表：快速切换任务；完整整理/多选操作在主区「任务」页（JobBoard）
-import { useEffect, useMemo, useState } from "react"
-import type { JobListItem, JobStatus } from "@/shared/schemas/job"
+import { useEffect, useState } from "react"
+import type { JobListItem } from "@/shared/schemas/job"
 import Button from "@/app/components/ui/Button"
 import { jobImageUrl } from "@/lib/api"
-import { groupJobs, type GroupBy, type JobGroup, type SortBy } from "@/lib/jobGroups"
-import { usePrefs } from "@/lib/hooks/usePrefs"
-import {
-  Badge,
-  CountsText,
-  GROUP_OPTIONS,
-  JobName,
-  LoadMore,
-  METHODS,
-  ProgressBar,
-  SORT_OPTIONS,
-  STATUS_CHIPS,
-  TERMINAL,
-  collapseKey,
-  countByStatus,
-  elapsedText,
-  filterJobs,
-  isLive,
-  pruneCollapsed,
-  statusColor,
-  type StatusFilter,
-} from "@/app/components/jobs/JobBits"
+import type { GroupBy, JobGroup, SortBy } from "@/lib/jobGroups"
+import { formatEnergy, isLive, isTerminal } from "@/lib/jobMeta"
+import { useJobs } from "@/lib/jobs/JobsContext"
+import { useJobOrganizer, type OrganizerPrefs } from "@/lib/hooks/useJobOrganizer"
+import { CountsText, GROUP_OPTIONS, JobName, LoadMore, METHOD_FILTERS, ProgressBar, SORT_OPTIONS, STATUS_CHIPS, StatusBadge, elapsedText } from "@/app/components/jobs/JobBits"
 
 export interface JobListProps {
-  jobs: JobListItem[]
-  trash: JobListItem[]
   curId: string | null
   onSelect: (id: string) => void
   onNew: () => void
-  onDelete: (id: string) => void
-  onRestore: (id: string) => void
-  onHardDelete: (id: string) => void
-  onClear: (statuses: JobStatus[]) => void
   /** 批次分组 → 打开批量页查看该批进度 */
   onOpenBatch?: (batchId: string) => void
-  /** 分组整理：整组已结束任务移入回收站 */
-  onDeleteMany?: (ids: string[]) => void
   /** 在主区「任务」页打开（大卡片 + 多选） */
   onExpand?: () => void
-  apiHint?: string
 }
 
 type ViewMode = "list" | "cards"
 
-interface Prefs {
-  groupBy: GroupBy
-  sortBy: SortBy
+interface Prefs extends OrganizerPrefs {
   view: ViewMode
-  collapsed: Record<string, boolean>
 }
 const DEFAULT_PREFS: Prefs = { groupBy: "batch", sortBy: "time", view: "cards", collapsed: {} }
 
@@ -71,12 +42,41 @@ interface ItemProps {
   onHardDelete: (id: string) => void
 }
 
-function JobCard({ j, now, active, trashMode, onSelect, onDelete, onRestore, onHardDelete }: ItemProps) {
+const liveText = (j: JobListItem, now: number) => `${j.status === "queued" ? "排队" : "运行"} ${elapsedText(j.created_at, now)}`
+
+function TrashActions({ j, onRestore, onHardDelete, compact }: Pick<ItemProps, "j" | "onRestore" | "onHardDelete"> & { compact: boolean }) {
+  const cls = compact ? "flex-1 text-[11px] border rounded py-0.5 dark:border-zinc-700" : "flex-1 text-[11px] border rounded-lg py-1 dark:border-zinc-700 hover:bg-white dark:hover:bg-zinc-800"
+  return (
+    <div className={`flex gap-1 ${compact ? "mt-1" : "mt-2"}`}>
+      <button
+        onClick={(e) => {
+          e.stopPropagation()
+          onRestore(j.id)
+        }}
+        className={cls}
+      >
+        恢复
+      </button>
+      <button
+        onClick={(e) => {
+          e.stopPropagation()
+          onHardDelete(j.id)
+        }}
+        className={`${cls} text-red-600`}
+      >
+        {compact ? "删除" : "彻底删除"}
+      </button>
+    </div>
+  )
+}
+
+function JobCard(p: ItemProps) {
+  const { j, now, active, trashMode } = p
   const live = isLive(j)
   const src = jobImageUrl(j.id) + (live ? `?t=${Math.floor(now / 10000)}` : "")
   return (
     <div
-      onClick={() => onSelect(j.id)}
+      onClick={() => p.onSelect(j.id)}
       className={`rounded-lg cursor-pointer border p-1.5 min-w-0 ${
         active ? "bg-white dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700" : "bg-transparent border-transparent hover:bg-white dark:hover:bg-zinc-800"
       }`}
@@ -86,53 +86,34 @@ function JobCard({ j, now, active, trashMode, onSelect, onDelete, onRestore, onH
       </div>
       <div className="flex justify-between items-center gap-1 mt-1">
         <JobName j={j} className="text-[11px]" />
-        <Badge color={statusColor(j.status)}>{j.status}</Badge>
+        <StatusBadge status={j.status} />
       </div>
       <div className="text-[11px] text-zinc-500 truncate">
-        {j.task}/{j.method || "gfn2"} ·{" "}
-        {live ? `${j.status === "queued" ? "排队" : "运行"} ${elapsedText(j.created_at, now)}` : `${j.result_energy?.toFixed(3) ?? "—"}`}
+        {j.task}/{j.method || "gfn2"} · {live ? liveText(j, now) : formatEnergy(j.result_energy, j.method, 3)}
       </div>
       {!trashMode ? (
         <button
           onClick={(e) => {
             e.stopPropagation()
-            onDelete(j.id)
+            p.onDelete(j.id)
           }}
           className="w-full text-[11px] text-zinc-400 hover:text-red-600 mt-0.5"
         >
           删除
         </button>
       ) : (
-        <div className="flex gap-1 mt-1">
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              onRestore(j.id)
-            }}
-            className="flex-1 text-[11px] border rounded py-0.5 dark:border-zinc-700"
-          >
-            恢复
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              onHardDelete(j.id)
-            }}
-            className="flex-1 text-[11px] border rounded py-0.5 text-red-600 dark:border-zinc-700"
-          >
-            删除
-          </button>
-        </div>
+        <TrashActions j={j} onRestore={p.onRestore} onHardDelete={p.onHardDelete} compact />
       )}
     </div>
   )
 }
 
-function JobRow({ j, now, active, trashMode, onSelect, onDelete, onRestore, onHardDelete }: ItemProps) {
+function JobRow(p: ItemProps) {
+  const { j, now, active, trashMode } = p
   const live = isLive(j)
   return (
     <div
-      onClick={() => onSelect(j.id)}
+      onClick={() => p.onSelect(j.id)}
       className={`p-3 rounded-lg cursor-pointer border ${
         active ? "bg-white dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700" : "bg-transparent border-transparent hover:bg-white dark:hover:bg-zinc-800"
       }`}
@@ -140,13 +121,13 @@ function JobRow({ j, now, active, trashMode, onSelect, onDelete, onRestore, onHa
       <div className="flex justify-between items-center gap-1">
         <JobName j={j} className="text-xs" />
         <span className="flex items-center gap-1 shrink-0">
-          <Badge color={statusColor(j.status)}>{j.status}</Badge>
+          <StatusBadge status={j.status} />
           {!trashMode && (
             <button
               title="删除"
               onClick={(e) => {
                 e.stopPropagation()
-                onDelete(j.id)
+                p.onDelete(j.id)
               }}
               className="px-1 text-zinc-400 hover:text-red-600"
             >
@@ -156,34 +137,10 @@ function JobRow({ j, now, active, trashMode, onSelect, onDelete, onRestore, onHa
         </span>
       </div>
       <div className="text-xs text-zinc-500 mt-1 truncate">
-        {j.task}/{j.method || "gfn2"} ·{" "}
-        {live
-          ? `${j.status === "queued" ? "排队" : "运行"} ${elapsedText(j.created_at, now)}`
-          : `${j.result_energy?.toFixed(3) ?? "—"} · ${j.wall_time?.toFixed(1) ?? ""}s`}
+        {j.task}/{j.method || "gfn2"} · {live ? liveText(j, now) : `${formatEnergy(j.result_energy, j.method, 3)} · ${j.wall_time?.toFixed(1) ?? ""}s`}
       </div>
       <div className="text-[11px] text-zinc-400">{j.created_at}</div>
-      {trashMode && (
-        <div className="flex gap-1 mt-2">
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              onRestore(j.id)
-            }}
-            className="flex-1 text-[11px] border rounded-lg py-1 dark:border-zinc-700 hover:bg-white dark:hover:bg-zinc-800"
-          >
-            恢复
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              onHardDelete(j.id)
-            }}
-            className="flex-1 text-[11px] border rounded-lg py-1 text-red-600 dark:border-zinc-700"
-          >
-            彻底删除
-          </button>
-        </div>
-      )}
+      {trashMode && <TrashActions j={j} onRestore={p.onRestore} onHardDelete={p.onHardDelete} compact={false} />}
     </div>
   )
 }
@@ -203,7 +160,7 @@ function GroupHeader({
   onOpenBatch?: (batchId: string) => void
   onDeleteMany?: (ids: string[]) => void
 }) {
-  const ended = g.jobs.filter((j) => TERMINAL.includes(j.status))
+  const ended = g.jobs.filter((j) => isTerminal(j.status))
   return (
     <div className="sticky top-0 z-[1] -mx-2 px-2 py-1.5 bg-zinc-50/95 dark:bg-zinc-900/95 backdrop-blur border-b dark:border-zinc-800">
       <button onClick={onToggle} className="flex items-center gap-1 w-full text-left text-xs" title={g.batchId ? `批次 ${g.batchId}` : g.label}>
@@ -236,52 +193,22 @@ function GroupHeader({
   )
 }
 
-export default function JobList({
-  jobs,
-  trash,
-  curId,
-  onSelect,
-  onNew,
-  onDelete,
-  onRestore,
-  onHardDelete,
-  onClear,
-  onOpenBatch,
-  onDeleteMany,
-  onExpand,
-  apiHint,
-}: JobListProps) {
-  const [query, setQuery] = useState("")
-  const [statusF, setStatusF] = useState<StatusFilter>("all")
-  const [methodF, setMethodF] = useState("all")
+export default function JobList({ curId, onSelect, onNew, onOpenBatch, onExpand }: JobListProps) {
+  const api = useJobs()
   const [trashMode, setTrashMode] = useState(false)
-  const [prefs, updatePrefs] = usePrefs<Prefs>("jobList.prefs.v1", DEFAULT_PREFS, pruneCollapsed)
-  const [limits, setLimits] = useState<Record<string, number>>({})
-  useEffect(() => setLimits({}), [prefs.groupBy, prefs.sortBy, prefs.view, statusF, methodF, query, trashMode])
+  const source = trashMode ? api.trash : api.jobs
+  const org = useJobOrganizer<Prefs>(source, { storageKey: "jobList.prefs.v1", defaults: DEFAULT_PREFS, pageSizeOf: () => SIDEBAR_PAGE, resetKey: trashMode })
+  const { prefs, update, groups, grouped } = org
+
+  // 有运行中任务时每秒刷新耗时文案
+  const hasLive = source.some(isLive)
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
+    if (!hasLive) return
+    setNow(Date.now())
     const t = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(t)
-  }, [])
-
-  const source = trashMode ? trash : jobs
-  const list = useMemo(() => filterJobs(source, statusF, methodF, query), [source, statusF, methodF, query])
-  // now 每秒变：分组只按分钟刷新（"今天/昨天"够用）
-  const minute = Math.floor(now / 60000)
-  const groups = useMemo(() => groupJobs(list, prefs.groupBy, prefs.sortBy, minute * 60000), [list, prefs.groupBy, prefs.sortBy, minute])
-  const doneCount = jobs.filter((j) => j.status === "done").length
-  const runningCount = jobs.filter(isLive).length
-  const grouped = prefs.groupBy !== "none"
-  const isCollapsed = (g: JobGroup) => grouped && !!prefs.collapsed[collapseKey(prefs.groupBy, g.key)]
-  const toggle = (g: JobGroup) => {
-    const k = collapseKey(prefs.groupBy, g.key)
-    updatePrefs({ collapsed: { ...prefs.collapsed, [k]: !prefs.collapsed[k] } })
-  }
-  const setAllCollapsed = (v: boolean) => {
-    const c = { ...prefs.collapsed }
-    for (const g of groups) c[collapseKey(prefs.groupBy, g.key)] = v
-    updatePrefs({ collapsed: c })
-  }
+  }, [hasLive])
 
   const itemProps = (j: JobListItem): ItemProps => ({
     j,
@@ -289,12 +216,13 @@ export default function JobList({
     active: curId === j.id,
     trashMode,
     onSelect,
-    onDelete,
-    onRestore,
-    onHardDelete,
+    onDelete: (id) => api.deleteMany([id]),
+    onRestore: (id) => api.restoreMany([id]),
+    onHardDelete: (id) => window.confirm("彻底删除这个任务？此操作不可恢复。") && api.hardDeleteMany([id]),
   })
 
   const selectCls = "border rounded-lg px-1 py-1 text-[11px] dark:bg-zinc-950 dark:border-zinc-800"
+  const toggleCls = (on: boolean) => `px-1.5 rounded ${on ? "bg-black text-white dark:bg-white dark:text-black" : "hover:bg-zinc-200 dark:hover:bg-zinc-800"}`
 
   return (
     <>
@@ -310,8 +238,8 @@ export default function JobList({
           )}
         </div>
         <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          value={org.query}
+          onChange={(e) => org.setQuery(e.target.value)}
           placeholder="搜索 名称 / id / 任务 / 方法…"
           className="w-full border rounded-lg px-2 py-1.5 text-xs dark:bg-zinc-950 dark:border-zinc-800 dark:text-zinc-100"
         />
@@ -319,18 +247,18 @@ export default function JobList({
           {STATUS_CHIPS.map((c) => (
             <button
               key={c.key}
-              onClick={() => setStatusF(c.key)}
+              onClick={() => org.setStatusF(c.key)}
               className={`px-2 py-0.5 rounded-full text-[11px] ${
-                statusF === c.key ? "bg-black text-white dark:bg-white dark:text-black" : "bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+                org.statusF === c.key ? "bg-black text-white dark:bg-white dark:text-black" : "bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
               }`}
             >
-              {c.label} {countByStatus(source, c.key)}
+              {c.label} {org.countOf(c.key)}
             </button>
           ))}
         </div>
         <div className="flex gap-1">
-          <select value={methodF} onChange={(e) => setMethodF(e.target.value)} className={`flex-1 ${selectCls}`}>
-            {METHODS.map((m) => (
+          <select value={org.methodF} onChange={(e) => org.setMethodF(e.target.value)} className={`flex-1 ${selectCls}`}>
+            {METHOD_FILTERS.map((m) => (
               <option key={m.key} value={m.key}>
                 {m.label}
               </option>
@@ -338,23 +266,18 @@ export default function JobList({
           </select>
           <button
             onClick={() => setTrashMode(!trashMode)}
-            className={`flex-1 border rounded-lg px-1 py-1 text-[11px] ${
-              trashMode ? "bg-black text-white dark:bg-white dark:text-black" : "dark:border-zinc-800 dark:text-zinc-300"
-            }`}
+            className={`flex-1 border rounded-lg px-1 py-1 text-[11px] ${trashMode ? "bg-black text-white dark:bg-white dark:text-black" : "dark:border-zinc-800 dark:text-zinc-300"}`}
           >
-            🗑 回收站({trash.length})
+            🗑 回收站({api.trash.length})
           </button>
         </div>
         {!trashMode && (
           <div className="flex gap-1">
-            <button
-              onClick={() => onClear(["done"])}
-              className="flex-1 text-[11px] text-zinc-500 hover:text-red-600 border rounded-lg py-1 dark:border-zinc-800"
-            >
+            <button onClick={() => api.clearByStatus(["done"])} className="flex-1 text-[11px] text-zinc-500 hover:text-red-600 border rounded-lg py-1 dark:border-zinc-800">
               清已完成
             </button>
             <button
-              onClick={() => onClear(["failed", "cancelled"])}
+              onClick={() => api.clearByStatus(["failed", "cancelled"])}
               className="flex-1 text-[11px] text-zinc-500 hover:text-red-600 border rounded-lg py-1 dark:border-zinc-800"
             >
               清失败/取消
@@ -362,14 +285,14 @@ export default function JobList({
           </div>
         )}
         <div className="flex gap-1">
-          <select value={prefs.groupBy} onChange={(e) => updatePrefs({ groupBy: e.target.value as GroupBy })} className={`flex-1 ${selectCls}`} title="分组方式">
+          <select value={prefs.groupBy} onChange={(e) => update({ groupBy: e.target.value as GroupBy })} className={`flex-1 ${selectCls}`} title="分组方式">
             {GROUP_OPTIONS.map((o) => (
               <option key={o.key} value={o.key}>
                 {o.label}
               </option>
             ))}
           </select>
-          <select value={prefs.sortBy} onChange={(e) => updatePrefs({ sortBy: e.target.value as SortBy })} className={`flex-1 ${selectCls}`} title="组内排序">
+          <select value={prefs.sortBy} onChange={(e) => update({ sortBy: e.target.value as SortBy })} className={`flex-1 ${selectCls}`} title="组内排序">
             {SORT_OPTIONS.map((o) => (
               <option key={o.key} value={o.key}>
                 {o.label}
@@ -379,31 +302,23 @@ export default function JobList({
         </div>
         <div className="flex gap-2 text-xs text-zinc-500">
           <span>
-            {doneCount} 已完成 · {runningCount} 运行中
+            {api.jobs.filter((j) => j.status === "done").length} 已完成 · {api.jobs.filter(isLive).length} 运行中
           </span>
           <span className="ml-auto flex gap-1">
             {grouped && groups.length > 1 && (
               <>
-                <button onClick={() => setAllCollapsed(true)} title="全部折叠" className="px-1.5 rounded hover:bg-zinc-200 dark:hover:bg-zinc-800">
+                <button onClick={() => org.setAllCollapsed(true)} title="全部折叠" className={toggleCls(false)}>
                   ⊟
                 </button>
-                <button onClick={() => setAllCollapsed(false)} title="全部展开" className="px-1.5 rounded hover:bg-zinc-200 dark:hover:bg-zinc-800">
+                <button onClick={() => org.setAllCollapsed(false)} title="全部展开" className={toggleCls(false)}>
                   ⊞
                 </button>
               </>
             )}
-            <button
-              onClick={() => updatePrefs({ view: "list" })}
-              title="列表视图"
-              className={`px-1.5 rounded ${prefs.view === "list" ? "bg-black text-white dark:bg-white dark:text-black" : "hover:bg-zinc-200 dark:hover:bg-zinc-800"}`}
-            >
+            <button onClick={() => update({ view: "list" })} title="列表视图" className={toggleCls(prefs.view === "list")}>
               ☰
             </button>
-            <button
-              onClick={() => updatePrefs({ view: "cards" })}
-              title="卡片视图（分子结构）"
-              className={`px-1.5 rounded ${prefs.view === "cards" ? "bg-black text-white dark:bg-white dark:text-black" : "hover:bg-zinc-200 dark:hover:bg-zinc-800"}`}
-            >
+            <button onClick={() => update({ view: "cards" })} title="卡片视图（分子结构）" className={toggleCls(prefs.view === "cards")}>
               ▦
             </button>
           </span>
@@ -411,7 +326,9 @@ export default function JobList({
       </div>
       <div className="flex-1 overflow-auto px-2 pb-2">
         {groups.map((g) => {
-          const collapsed = isCollapsed(g)
+          const collapsed = org.isCollapsed(g)
+          const limit = org.limitOf(g)
+          const shown = g.jobs.slice(0, limit)
           return (
             <section key={g.key} className={grouped ? "mb-1" : "pt-2"}>
               {grouped && (
@@ -419,41 +336,32 @@ export default function JobList({
                   g={g}
                   collapsed={collapsed}
                   showBar={prefs.groupBy === "batch" && !!g.batchId}
-                  onToggle={() => toggle(g)}
+                  onToggle={() => org.toggleGroup(g)}
                   onOpenBatch={trashMode ? undefined : onOpenBatch}
-                  onDeleteMany={trashMode ? undefined : onDeleteMany}
+                  onDeleteMany={trashMode ? undefined : api.deleteMany}
                 />
               )}
               {!collapsed &&
                 (prefs.view === "cards" ? (
                   <div className="grid grid-cols-2 gap-2 content-start pt-2">
-                    {g.jobs.slice(0, limits[g.key] ?? SIDEBAR_PAGE).map((j) => (
+                    {shown.map((j) => (
                       <JobCard key={j.id} {...itemProps(j)} />
                     ))}
                   </div>
                 ) : (
                   <div className="space-y-1 pt-1">
-                    {g.jobs.slice(0, limits[g.key] ?? SIDEBAR_PAGE).map((j) => (
+                    {shown.map((j) => (
                       <JobRow key={j.id} {...itemProps(j)} />
                     ))}
                   </div>
                 ))}
-              {!collapsed && g.jobs.length > (limits[g.key] ?? SIDEBAR_PAGE) && (
-                <LoadMore
-                  remaining={g.jobs.length - (limits[g.key] ?? SIDEBAR_PAGE)}
-                  onMore={() => setLimits((l) => ({ ...l, [g.key]: (l[g.key] ?? SIDEBAR_PAGE) + SIDEBAR_PAGE }))}
-                />
-              )}
+              {!collapsed && g.jobs.length > limit && <LoadMore remaining={g.jobs.length - limit} onMore={() => org.showMore(g.key)} />}
             </section>
           )
         })}
-        {list.length === 0 && <div className="text-xs text-zinc-400 text-center py-8">{trashMode ? "回收站是空的" : "暂无任务"}</div>}
+        {org.list.length === 0 && <div className="text-xs text-zinc-400 text-center py-8">{trashMode ? "回收站是空的" : "暂无任务"}</div>}
       </div>
-      {apiHint !== undefined && (
-        <div className="p-3 border-t dark:border-zinc-800 text-[11px] text-zinc-500">
-          法国VPS 24核 · xtb/psi4/uff · {apiHint || "/api"}
-        </div>
-      )}
+      <div className="p-3 border-t dark:border-zinc-800 text-[11px] text-zinc-500">法国VPS 24核 · xtb/psi4/uff · /api 代理</div>
     </>
   )
 }

@@ -1,5 +1,7 @@
 // 任务卡片分组/排序 — 侧边栏整理归类用（纯函数，便于单测）
 import type { JobListItem } from "@/shared/schemas/job"
+// 相对路径：本文件需可单独编译做单元测试
+import { METHODS, STATUS_BUCKET_LABEL, methodLabel, statusBucket, type StatusBucket } from "./jobMeta"
 
 export type GroupBy = "none" | "batch" | "status" | "method" | "date"
 export type SortBy = "time" | "energy" | "name"
@@ -26,10 +28,8 @@ export function createdMs(createdAt: string): number {
   return Number.isFinite(t) ? t : NaN
 }
 
-const STATUS_ORDER = ["running", "failed", "done", "cancelled"]
-const STATUS_LABEL: Record<string, string> = { running: "运行中 / 排队", failed: "失败", done: "已完成", cancelled: "已取消" }
-const METHOD_ORDER = ["gfn2", "gfn1", "gfnff", "uff", "psi4"]
-const METHOD_LABEL: Record<string, string> = { gfn2: "xtb GFN2", gfn1: "xtb GFN1", gfnff: "xtb GFN-FF", uff: "UFF", psi4: "psi4" }
+const STATUS_ORDER: string[] = Object.keys(STATUS_BUCKET_LABEL)
+const METHOD_ORDER: string[] = METHODS.map((m) => m.key)
 
 const collator = new Intl.Collator("zh-CN", { numeric: true, sensitivity: "base" })
 const pad = (n: number) => String(n).padStart(2, "0")
@@ -45,7 +45,7 @@ function shortTime(ms: number): string {
   return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-const statusKey = (s: string) => (s === "queued" ? "running" : s)
+const statusKey = statusBucket
 
 /** 批次内名称公共前缀，去掉尾部数字/分隔符：raw220.sdf…raw231.sdf → "raw" */
 export function commonNamePrefix(names: string[]): string {
@@ -122,8 +122,8 @@ export function groupJobs(jobs: JobListItem[], groupBy: GroupBy, sortBy: SortBy,
     else if (key.startsWith("b:")) {
       batchId = key.slice(2)
       label = batchLabel(js)
-    } else if (key.startsWith("s:")) label = STATUS_LABEL[key.slice(2)] || key.slice(2)
-    else if (key.startsWith("m:")) label = METHOD_LABEL[key.slice(2)] || key.slice(2)
+    } else if (key.startsWith("s:")) label = STATUS_BUCKET_LABEL[key.slice(2) as StatusBucket] || key.slice(2)
+    else if (key.startsWith("m:")) label = methodLabel(key.slice(2))
     else if (key.startsWith("d:")) {
       const d = key.slice(2)
       label = d === today ? "今天" : d === yesterday ? "昨天" : d === "unknown" ? "未知日期" : d
