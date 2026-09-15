@@ -125,8 +125,9 @@ def job_image(jid: str):
 @router.get("/jobs/{jid}")
 def get_job(jid: str):
     row = job_service.get_job(jid)
-    # 历史行为：不存在时 200 + error（前端按有无 id 判断）；改 404 需前后端一起调整
-    return row if row else {"error": "not found"}
+    if not row:
+        raise HTTPException(404, "job not found")
+    return row
 
 
 @router.get("/jobs/{jid}/events")
