@@ -1,0 +1,92 @@
+# chem-portal 解耦版 docker-compose
+# api  -> FastAPI (18080)  : 不再托管前端静态文件
+# worker -> xtb 任务执行器 : 通过 Redis 队列解耦
+# redis -> 队列
+# db    -> PostgreSQL (可选回退到 SQLite 文件)
+# 前端已分离到 chem-portal-web (Next.js 14, 部署于 Vercel)，通过 NEXT_PUBLIC_API_URL 指向 api
+
+services:
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: chem
+      POSTGRES_PASSWORD: CHANGEME
+      POSTGRES_DB: chem_portal
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chem -d chem_portal"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "18080:8000"
+    environment:
+      DATABASE_URL: postgresql://chem:CHANGEME@db:5432/chem_portal
+      REDIS_URL: redis://redis:6379/0
+      XTB_BIN: /opt/xtb/bin/xtb
+      PYTHONPATH: /app
+    volumes:
+      - ./shared:/app/shared:ro
+      - ./database:/app/database
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --workers 2
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/api/health"]
+      interval: 10s
+      retries: 5
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://chem:CHANGEME@db:5432/chem_portal
+      REDIS_URL: redis://redis:6379/0
+      XTB_BIN: /opt/xtb/bin/xtb
+      PYTHONPATH: /app
+      OMP_NUM_THREADS: 8
+    volumes:
+      - ./shared:/app/shared:ro
+      - ./database:/app/database
+      - ./results:/app/results
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: python -m worker.worker
+    deploy:
+      resources:
+        limits:
+          cpus: '8'
+
+volumes:
+  pgdata:
+  redisdata:

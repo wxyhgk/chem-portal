@@ -1,0 +1,125 @@
+import sqlite3, uuid, time, subprocess, tempfile, os
+from pathlib import Path
+from fastapi import FastAPI, BackgroundTasks
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+DB = Path(__file__).parent.parent / "database" / "chem.db"
+XTB = "/root/Software/xtb/xtb_v6.7.1/bin/xtb"
+
+app = FastAPI(title="Chem Portal")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"], allow_credentials=True)
+
+class JobIn(BaseModel):
+    xyz: str
+    method: str = "gfn2"
+    charge: int = 0
+    threads: int = 8
+    task: str = "sp"  # sp / opt
+
+def db():
+    con = sqlite3.connect(str(DB))
+    con.row_factory = sqlite3.Row
+    return con
+
+def run_job(job_id: str):
+    con = db()
+    row = con.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+    if not row:
+        return
+    con.execute("UPDATE jobs SET status='running' WHERE id=?", (job_id,))
+    con.commit()
+    xyz = row["xyz"] if "xyz" in row.keys() else row["input_xyz"]
+    # try column name
+    if xyz is None:
+        xyz = row["input_xyz"]
+    threads = row["threads"]
+    task = row["task"] if "task" in row.keys() and row["task"] else "sp"
+    t0 = time.time()
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "input.xyz"
+            p.write_text(xyz)
+            if task == "opt":
+                cmd = [XTB, str(p), "--opt", "--chrg", str(row["charge"])]
+            else:
+                cmd = [XTB, str(p), "--sp", "--chrg", str(row["charge"])]
+            # xtb uses OMP threads via env
+            env = os.environ.copy()
+            env["OMP_NUM_THREADS"] = str(threads)
+            env["MKL_NUM_THREADS"] = str(threads)
+            proc = subprocess.run(cmd, cwd=td, capture_output=True, text=True, timeout=600, env=env)
+            out = proc.stdout + "\n" + proc.stderr
+            # parse energy
+            energy = None
+            for line in out.splitlines():
+                if "TOTAL ENERGY" in line:
+                    try:
+                        energy = float(line.split()[-3])
+                    except: pass
+            # for opt, read optimized xyz
+            result_xyz = None
+            opt_log = Path(td) / "xtbopt.log"
+            opt_xyz = Path(td) / "xtbopt.xyz"
+            if task == "opt" and opt_log.exists():
+                try:
+                    # xtbopt.log contains full optimization trajectory (multi-xyz)
+                    traj = opt_log.read_text()
+                    # also append final if needed, but log already contains all frames
+                    result_xyz = traj[:50000]
+                except: pass
+            elif opt_xyz.exists():
+                try:
+                    result_xyz = opt_xyz.read_text()[:50000]
+                except: pass
+            wall = time.time() - t0
+            con.execute("UPDATE jobs SET status='done', result_energy=?, result_log=?, result_xyz=?, wall_time=? WHERE id=?", (energy, out[:8000], result_xyz, wall, job_id))
+            con.commit()
+    except Exception as e:
+        wall = time.time() - t0
+        con.execute("UPDATE jobs SET status='failed', result_log=?, wall_time=? WHERE id=?", (str(e), wall, job_id))
+        con.commit()
+    finally:
+        con.close()
+
+@app.post("/api/jobs")
+def create_job(job: JobIn, bg: BackgroundTasks):
+    jid = uuid.uuid4().hex[:12]
+    con = db()
+    # handle both xyz/input_xyz column
+    try:
+        con.execute("INSERT INTO jobs (id,status,method,charge,threads,input_xyz,task) VALUES (?,?,?,?,?,?,?)", (jid, "queued", job.method, job.charge, job.threads, job.xyz, job.task))
+    except sqlite3.OperationalError as e:
+        # fallback if column is xyz
+        con.execute("INSERT INTO jobs (id,status,method,charge,threads,xyz,task) VALUES (?,?,?,?,?,?,?)", (jid, "queued", job.method, job.charge, job.threads, job.xyz, job.task))
+    con.commit()
+    con.close()
+    bg.add_task(run_job, jid)
+    return {"id": jid, "status": "queued"}
+
+@app.get("/api/jobs")
+def list_jobs():
+    con = db()
+    rows = con.execute("SELECT id,status,method,charge,threads,task,created_at,result_energy,wall_time FROM jobs ORDER BY created_at DESC LIMIT 50").fetchall()
+    con.close()
+    return [dict(r) for r in rows]
+
+@app.get("/api/jobs/{jid}")
+def get_job(jid: str):
+    con = db()
+    row = con.execute("SELECT * FROM jobs WHERE id=?", (jid,)).fetchone()
+    con.close()
+    if not row:
+        return {"error": "not found"}
+    return dict(row)
+
+@app.get("/api/health")
+def health():
+    return {"ok": True, "xtb": os.path.exists(XTB)}
+
+# frontend static
+frontend = Path(__file__).parent.parent / "frontend"
+if frontend.exists():
+    app.mount("/", StaticFiles(directory=str(frontend), html=True), name="frontend")

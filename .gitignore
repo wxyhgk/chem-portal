@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+
+# 数据与运行产物（数据库由 scripts/backup_db.sh 每日备份）
+database/*.db
+database/*.db-wal
+database/*.db-shm
+results/
+uploads/
+timer.dat
+*.log
+.env
