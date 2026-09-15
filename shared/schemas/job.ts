@@ -28,6 +28,8 @@ export interface Job {
   result_xyz?: string | null;   // 优化轨迹 (opt) 或单点结果
   wall_time?: number | null;    // 秒
   deleted?: number | null;      // 软删标记 1=回收站（列表默认排除）
+  name?: string | null;         // 任务名（SDF 标题/文件名）
+  batch_id?: string | null;     // 批量提交的批次 id（单个提交为空）
 }
 
 /** 创建任务的请求体 — POST /api/jobs */
@@ -40,10 +42,37 @@ export interface JobCreate {
   psi_method?: PsiMethod;       // 仅 method=psi4 时生效，默认 b3lyp
   psi_basis?: string;           // 仅 method=psi4 时生效，默认 def2-SVP
   multiplicity?: number;        // 自旋多重度 1-8，默认 1
+  name?: string;                // 任务名，≤200 字符
+}
+
+/** 批量中的单个分子 */
+export interface BatchItem {
+  xyz: string;                  // 前端经 /api/embed 由 SDF 生成
+  name?: string;
+  charge?: number;              // 缺省用批次 charge（前端带入 SDF 形式电荷）
+}
+
+/** 批量创建请求体 — POST /api/jobs/batch（只入队，后端限并发执行），items ≤2000 */
+export interface BatchCreate extends Omit<JobCreate, "xyz" | "name"> {
+  items: BatchItem[];
+}
+
+/** 批次汇总 — GET /api/batches */
+export interface BatchSummary {
+  batch_id: string;
+  created_at: string;
+  total: number;
+  queued: number;
+  running: number;
+  done: number;
+  failed: number;
+  cancelled: number;
+  method?: JobMethod | null;
+  task?: JobTask | null;
 }
 
 /** 列表页轻量返回 — GET /api/jobs */
-export type JobListItem = Pick<Job, "id" | "status" | "method" | "charge" | "threads" | "task" | "created_at" | "result_energy" | "wall_time">;
+export type JobListItem = Pick<Job, "id" | "status" | "method" | "charge" | "threads" | "task" | "created_at" | "result_energy" | "wall_time" | "name" | "batch_id">;
 
 /** 单个任务详情 — GET /api/jobs/{id} */
 export type JobDetail = Job;

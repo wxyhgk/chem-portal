@@ -24,12 +24,58 @@ class JobCreate(BaseModel):
     psi_method: PsiMethod = Field(default="b3lyp", description="psi4 方法: hf/b3lyp/pbe/mp2")
     psi_basis: str = Field(default="def2-SVP", description="psi4 基组，默认 def2-SVP")
     multiplicity: int = Field(default=1, ge=1, le=8, description="自旋多重度")
+    name: Optional[str] = Field(default=None, max_length=200, description="任务名（SDF 标题/文件名）")
 
     @model_validator(mode="after")
     def _reject_blank_xyz(self):
         if not (self.xyz or "").strip():
             raise ValueError("xyz 为空：请粘贴 XYZ 坐标或上传 SDF 生成")
         return self
+
+class BatchItem(BaseModel):
+    """批量中的单个分子"""
+    xyz: str = Field(..., description="XYZ 文本（前端经 /api/embed 由 SDF 生成）")
+    name: Optional[str] = Field(default=None, max_length=200)
+    charge: Optional[int] = Field(default=None, description="缺省用批次 charge（前端带入 SDF 形式电荷）")
+
+    @model_validator(mode="after")
+    def _reject_blank_xyz(self):
+        if not (self.xyz or "").strip():
+            raise ValueError("xyz 为空")
+        return self
+
+class BatchCreate(BaseModel):
+    """POST /api/jobs/batch 请求体 — 共用计算参数，逐分子建任务（只入队，后端限并发执行）"""
+    items: list[BatchItem] = Field(..., min_length=1, max_length=2000)
+    method: JobMethod = Field(default="gfn2")
+    charge: int = Field(default=0)
+    threads: int = Field(default=8, ge=1, le=32)
+    task: JobTask = Field(default="sp")
+    psi_method: PsiMethod = Field(default="b3lyp")
+    psi_basis: str = Field(default="def2-SVP")
+    multiplicity: int = Field(default=1, ge=1, le=8)
+
+    def to_job(self, item: BatchItem) -> JobCreate:
+        return JobCreate(
+            xyz=item.xyz, name=item.name,
+            charge=self.charge if item.charge is None else item.charge,
+            method=self.method, threads=self.threads, task=self.task,
+            psi_method=self.psi_method, psi_basis=self.psi_basis, multiplicity=self.multiplicity,
+        )
+
+class BatchSummary(BaseModel):
+    """GET /api/batches 批次汇总"""
+    batch_id: str
+    created_at: str
+    total: int
+    queued: int
+    running: int
+    done: int
+    failed: int
+    cancelled: int
+    method: Optional[JobMethod] = None
+    task: Optional[JobTask] = None
+
 class Job(BaseModel):
     """完整 Job 实体 — 对应 DB 行与 GET /api/jobs/{id} 返回"""
     id: str

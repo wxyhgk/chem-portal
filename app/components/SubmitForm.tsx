@@ -4,6 +4,7 @@ import { useRef, useState } from "react"
 import type { JobMethod, JobTask, PsiMethod } from "@/shared/schemas/job"
 import { embedSdf } from "@/lib/api"
 import Button from "@/app/components/ui/Button"
+import { BaseParamFields, PsiParamFields } from "@/app/components/JobParamsFields"
 
 export interface SubmitFormProps {
   xyz: string
@@ -25,8 +26,6 @@ export interface SubmitFormProps {
   onMultiplicityChange: (v: number) => void
   onSubmit: () => void
 }
-
-const inputCls = "w-full mt-1 border rounded-lg p-2 text-sm dark:bg-zinc-950 dark:border-zinc-800"
 
 export default function SubmitForm({
   xyz,
@@ -60,9 +59,10 @@ export default function SubmitForm({
     }
     setNote("距离几何生成 3D 坐标中…")
     try {
-      const { xyz: gen } = await embedSdf(await f.text())
+      const { xyz: gen, charge: sdfCharge } = await embedSdf(await f.text())
       onXyzChange(gen)
-      setNote(`已生成 ${gen.split("\n")[0]} 原子 3D 坐标，可预览后提交`)
+      onChargeChange(sdfCharge)
+      setNote(`已生成 ${gen.split("\n")[0]} 原子 3D 坐标（charge 取 SDF 形式电荷 ${sdfCharge}），可预览后提交`)
     } catch (e) {
       setNote(`转换失败: ${String(e)}`)
     }
@@ -95,41 +95,16 @@ export default function SubmitForm({
         className="w-full h-28 font-mono text-xs border rounded-lg p-3 dark:bg-zinc-950 dark:border-zinc-800 dark:text-zinc-100"
       />
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-3">
-        <label className="text-xs">
-          任务
-          <select value={task} onChange={(e) => onTaskChange(e.target.value as JobTask)} className={inputCls}>
-            <option value="sp">单点 sp</option>
-            <option value="opt">优化 opt + 动画</option>
-          </select>
-        </label>
-        <label className="text-xs">
-          方法
-          <select value={method} onChange={(e) => onMethodChange(e.target.value as JobMethod)} className={inputCls}>
-            <option value="gfn2">xtb GFN2</option>
-            <option value="gfn1">xtb GFN1</option>
-            <option value="gfnff">xtb GFN-FF</option>
-            <option value="uff">UFF 全元素力场</option>
-            <option value="psi4">psi4 ab initio</option>
-          </select>
-        </label>
-        <label className="text-xs">
-          charge
-          <input
-            type="number"
-            value={charge}
-            onChange={(e) => onChargeChange(parseInt(e.target.value) || 0)}
-            className="w-full mt-1 border rounded-lg p-2 dark:bg-zinc-950 dark:border-zinc-800"
-          />
-        </label>
-        <label className="text-xs">
-          threads
-          <input
-            type="number"
-            value={threads}
-            onChange={(e) => onThreadsChange(parseInt(e.target.value) || 8)}
-            className="w-full mt-1 border rounded-lg p-2 dark:bg-zinc-950 dark:border-zinc-800"
-          />
-        </label>
+        <BaseParamFields
+          task={task}
+          method={method}
+          charge={charge}
+          threads={threads}
+          onTaskChange={onTaskChange}
+          onMethodChange={onMethodChange}
+          onChargeChange={onChargeChange}
+          onThreadsChange={onThreadsChange}
+        />
         <div className="flex items-end col-span-2 md:col-span-1">
           <Button onClick={onSubmit} disabled={!xyz.trim()} title={xyz.trim() ? "提交计算" : "先粘贴 XYZ 或上传 SDF"} className="w-full disabled:opacity-40">
             提交计算
@@ -137,38 +112,14 @@ export default function SubmitForm({
         </div>
       </div>
       {isPsi4 && (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3 border-t dark:border-zinc-800 pt-3">
-          <label className="text-xs">
-            psi4 方法
-            <select value={psiMethod} onChange={(e) => onPsiMethodChange(e.target.value as PsiMethod)} className={inputCls}>
-              <option value="b3lyp">B3LYP</option>
-              <option value="hf">HF</option>
-              <option value="pbe">PBE</option>
-              <option value="mp2">MP2</option>
-            </select>
-          </label>
-          <label className="text-xs">
-            基组
-            <input
-              type="text"
-              value={psiBasis}
-              placeholder="def2-SVP"
-              onChange={(e) => onPsiBasisChange(e.target.value)}
-              className="w-full mt-1 border rounded-lg p-2 font-mono dark:bg-zinc-950 dark:border-zinc-800"
-            />
-          </label>
-          <label className="text-xs">
-            自旋多重度
-            <input
-              type="number"
-              min={1}
-              max={8}
-              value={multiplicity}
-              onChange={(e) => onMultiplicityChange(Math.min(8, Math.max(1, parseInt(e.target.value) || 1)))}
-              className="w-full mt-1 border rounded-lg p-2 dark:bg-zinc-950 dark:border-zinc-800"
-            />
-          </label>
-        </div>
+        <PsiParamFields
+          psiMethod={psiMethod}
+          psiBasis={psiBasis}
+          multiplicity={multiplicity}
+          onPsiMethodChange={onPsiMethodChange}
+          onPsiBasisChange={onPsiBasisChange}
+          onMultiplicityChange={onMultiplicityChange}
+        />
       )}
       {note && <div className="text-xs text-blue-600 mt-2">{note}</div>}
       {msg && <div className="text-xs text-green-600 mt-2">{msg}</div>}

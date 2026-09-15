@@ -3,7 +3,7 @@
 import type { Job } from "@/shared/schemas/job"
 import Button from "@/app/components/ui/Button"
 
-export type TabKey = "view3d" | "xyz" | "log"
+export type TabKey = "view3d" | "xyz" | "log" | "batch"
 
 export interface HeaderTabsProps {
   tab: TabKey
@@ -22,6 +22,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "view3d", label: "🧬 3D" },
   { key: "xyz", label: "XYZ" },
   { key: "log", label: "日志" },
+  { key: "batch", label: "📦 批量" },
 ]
 
 export default function HeaderTabs({ tab, onTab, sideOpen, onToggleSide, cur, dark, onToggleDark, onClone, onCancel, onDelete }: HeaderTabsProps) {

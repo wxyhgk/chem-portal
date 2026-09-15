@@ -5,12 +5,14 @@ import type { Job, JobListItem, JobMethod, JobStatus, JobTask, PsiMethod } from 
 import { useViewer } from "@/lib/hooks/useViewer"
 import { useJobStream } from "@/lib/hooks/useJobStream"
 import { isTrajectoryTask } from "@/lib/xyz"
+import { runPool } from "@/lib/pool"
 import JobList from "@/app/components/JobList"
 import SubmitForm from "@/app/components/SubmitForm"
 import Viewer3D from "@/app/components/Viewer3D"
 import HeaderTabs, { type TabKey } from "@/app/components/HeaderTabs"
 import XyzPanel from "@/app/components/XyzPanel"
 import LogPanel from "@/app/components/LogPanel"
+import BatchPanel from "@/app/components/BatchPanel"
 
 export default function Page(){
   const [xyz,setXyz]=useState("")
@@ -44,6 +46,7 @@ export default function Page(){
   }
 
   const [trash,setTrash]=useState<JobListItem[]>([])
+  const [batchFocus,setBatchFocus]=useState<{id:string;n:number}|null>(null)
   const loadJobs=async()=>{ try{ const [a,b]=await Promise.all([listJobs(),listJobs(true)]); setJobs(a); setTrash(b) }catch(e){ console.error(e) } }
   // 克隆重跑：当前任务参数回填表单
   const cloneCur=()=>{ if(!cur) return; const c=cur; setXyz(c.input_xyz||""); setTask((c.task as string)==="md" ? "opt" : c.task); setMethod(c.method as JobMethod); setCharge(c.charge); setThreads(c.threads); if(c.psi_method) setPsiMethod(c.psi_method); if(c.psi_basis) setPsiBasis(c.psi_basis); if(c.multiplicity) setMultiplicity(c.multiplicity); setCur(null); setTab("view3d"); renderXyz(c.input_xyz||""); setMsg(`已载入 ${c.id.slice(0,8)} 参数，修改后提交`) }
@@ -52,6 +55,9 @@ export default function Page(){
   const deleteOne=async(id:string)=>{ try{ await removeJob(id); if(cur?.id===id) setCur(null); loadJobs() }catch(e){ console.error(e) } }
   const restoreOne=async(id:string)=>{ try{ await restoreJob(id); loadJobs() }catch(e){ console.error(e) } }
   const hardDeleteOne=async(id:string)=>{ try{ await removeJob(id,true); if(cur?.id===id) setCur(null); loadJobs() }catch(e){ console.error(e) } }
+  // 侧边栏分组整理：整组移入回收站（软删，可恢复）
+  const deleteMany=async(ids:string[])=>{ let n=0; await runPool(ids,8,async(id)=>{ try{ await removeJob(id); n++ }catch(e){ console.error(e) } }); if(cur && ids.includes(cur.id)) setCur(null); loadJobs(); setMsg(`已移入回收站 ${n}/${ids.length} 个`) }
+  const openBatch=(id:string)=>{ setBatchFocus({id, n:Date.now()}); setTab("batch"); if(window.innerWidth<768) setSideOpen(false) }
   const clearBy=async(statuses:JobStatus[])=>{ try{ const r=await clearJobs(statuses); loadJobs(); setMsg(`已清理 ${r.cleared} 个任务`) }catch(e:any){ setMsg(`清理失败: ${String(e?.message||e)}`) } }
   const handleTaskChange=(v:JobTask)=>{ setTask(v) }
   const submit=async()=>{
@@ -100,7 +106,7 @@ export default function Page(){
         <span className="font-bold text-sm">Chem Portal</span>
         <button onClick={()=>setSideOpen(false)} className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded">✕</button>
       </div>
-      <JobList jobs={jobs} trash={trash} curId={cur?.id ?? null} onSelect={show} onNew={()=>{setCur(null); setXyz(""); setTab("view3d"); renderXyz("")}} onDelete={deleteOne} onRestore={restoreOne} onHardDelete={hardDeleteOne} onClear={clearBy} apiHint={API_BASE || "/api代理"} />
+      <JobList jobs={jobs} trash={trash} curId={cur?.id ?? null} onSelect={show} onNew={()=>{setCur(null); setXyz(""); setTab("view3d"); renderXyz("")}} onDelete={deleteOne} onRestore={restoreOne} onHardDelete={hardDeleteOne} onClear={clearBy} onOpenBatch={openBatch} onDeleteMany={deleteMany} apiHint={API_BASE || "/api代理"} />
     </aside>
 
     {/* 主区 */}
@@ -110,14 +116,23 @@ export default function Page(){
       {/* 中间内容区 */}
       <div className="flex-1 overflow-auto bg-zinc-50 dark:bg-black p-3 md:p-6">
         <div className="max-w-5xl mx-auto space-y-4">
-          <SubmitForm xyz={xyz} task={task} method={method} charge={charge} threads={threads}
+          {/* 批量 tab：隐藏而非卸载，保留已拖入的文件列表 */}
+          <div className={tab==="batch"?"":"hidden"}>
+            <BatchPanel active={tab==="batch"} task={task} method={method}
+              psiMethod={psiMethod} psiBasis={psiBasis} multiplicity={multiplicity}
+              onTaskChange={handleTaskChange} onMethodChange={setMethod}
+              onPsiMethodChange={setPsiMethod} onPsiBasisChange={setPsiBasis} onMultiplicityChange={setMultiplicity}
+              onSelect={show} onSubmitted={loadJobs} focusBatch={batchFocus} />
+          </div>
+
+          {tab!=="batch" && <SubmitForm xyz={xyz} task={task} method={method} charge={charge} threads={threads}
             psiMethod={psiMethod} psiBasis={psiBasis} multiplicity={multiplicity} msg={msg}
             onXyzChange={v=>{setXyz(v); renderXyz(v)}} onTaskChange={handleTaskChange} onMethodChange={setMethod}
             onChargeChange={setCharge} onThreadsChange={setThreads} onPsiMethodChange={setPsiMethod}
-            onPsiBasisChange={setPsiBasis} onMultiplicityChange={setMultiplicity} onSubmit={submit} />
+            onPsiBasisChange={setPsiBasis} onMultiplicityChange={setMultiplicity} onSubmit={submit} />}
 
-          {/* 优化过程展示区 - 根据 tab 切换 */}
-          <div className="bg-white dark:bg-zinc-900 rounded-xl border dark:border-zinc-800 shadow-sm overflow-hidden">
+          {/* 优化过程展示区 - 根据 tab 切换（批量 tab 下隐藏，viewer 不卸载） */}
+          <div className={`bg-white dark:bg-zinc-900 rounded-xl border dark:border-zinc-800 shadow-sm overflow-hidden ${tab==="batch"?"hidden":""}`}>
             <div className={tab==="view3d"?"":"hidden"}>
               <Viewer3D cur={cur} frames={frames} frame={frame} viewerErr={viewerErr} debug={debug} viewerElRef={viewerElRef}
                 onPlay={play} onPause={pause} onReset={reset} onFrameChange={goToFrame} />

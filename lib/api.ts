@@ -2,7 +2,7 @@
 // 基地址代理优先：默认相对路径 /api/*（next.config.mjs rewrite 到后端），仅显式设置 NEXT_PUBLIC_API_URL 时直连
 // 通过 tsconfig paths 别名 @shared/* 与 @/* 可被 app/page.tsx 直接 import
 
-import type { Job, JobCreate, JobListItem, JobStatus, JobTask, JobMethod, PsiMethod } from "@shared/schemas/job";
+import type { BatchCreate, BatchSummary, Job, JobCreate, JobListItem, JobStatus, JobTask, JobMethod, PsiMethod } from "@shared/schemas/job";
 import { getApiBase } from "@shared/schemas/job";
 
 // 统一基地址 — 与 shared/schemas/job.ts#getApiBase 一致
@@ -13,8 +13,8 @@ export const jobEventsUrl = (id: string): string => `${API_BASE}/api/jobs/${id}/
 
 /** 任务分子卡片图 — GET /api/jobs/{id}/image.svg（相对路径时走 rewrite 代理） */
 export const jobImageUrl = (id: string): string => `${API_BASE}/api/jobs/${id}/image.svg`;
-/** SDF → 3D XYZ（RDKit ETKDG 距离几何） */
-export async function embedSdf(sdf: string): Promise<{ xyz: string }> {
+/** SDF → 3D XYZ（RDKit ETKDG 距离几何）；charge 为 SDF 形式电荷，name 为标题行（可能为空） */
+export async function embedSdf(sdf: string): Promise<{ xyz: string; charge: number; name: string }> {
   const r = await fetch(`${API_BASE}/api/embed`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -24,9 +24,34 @@ export async function embedSdf(sdf: string): Promise<{ xyz: string }> {
   return r.json();
 }
 
-export async function listJobs(showDeleted = false): Promise<JobListItem[]> {
-  const r = await fetch(`${API_BASE}/api/jobs${showDeleted ? "?show_deleted=1" : ""}`, { cache: "no-store" });
+export async function listJobs(showDeleted = false, batchId?: string): Promise<JobListItem[]> {
+  const q = new URLSearchParams();
+  if (showDeleted) q.set("show_deleted", "1");
+  if (batchId) {
+    q.set("batch_id", batchId);
+    q.set("limit", "5000");
+  }
+  const qs = q.toString();
+  const r = await fetch(`${API_BASE}/api/jobs${qs ? `?${qs}` : ""}`, { cache: "no-store" });
   if (!r.ok) throw new Error(`listJobs ${r.status}`);
+  return r.json();
+}
+
+/** 批量建任务（只入队，后端按并发上限执行） */
+export async function createBatch(input: BatchCreate): Promise<{ batch_id: string; ids: string[]; count: number }> {
+  const r = await fetch(`${API_BASE}/api/jobs/batch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!r.ok) throw new Error(`createBatch ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  return r.json();
+}
+
+/** 最近批次汇总 */
+export async function listBatches(): Promise<BatchSummary[]> {
+  const r = await fetch(`${API_BASE}/api/batches`, { cache: "no-store" });
+  if (!r.ok) throw new Error(`listBatches ${r.status}`);
   return r.json();
 }
 
