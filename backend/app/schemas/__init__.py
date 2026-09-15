@@ -1,2 +1,3 @@
-from .job import JobIn, normalize_job_row
-__all__ = ["JobIn", "normalize_job_row"]
+from .job import BatchIn, JobIn, normalize_job_row
+
+__all__ = ["BatchIn", "JobIn", "normalize_job_row"]

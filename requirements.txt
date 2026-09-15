@@ -1,5 +1,5 @@
 fastapi
 uvicorn
 pydantic>=2
-redis>=5
-python-multipart
+# 化学工具（SDF 转 3D、结构图、UFF）；psi4 与 cclib 在独立 conda 环境（compute.config.PSI4_PYTHON）
+rdkit

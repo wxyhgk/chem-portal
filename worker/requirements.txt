@@ -1,4 +1,0 @@
-# worker 依赖 (可选 redis)
-# 基础运行无需额外依赖 (仅 stdlib + sqlite)
-# 有 Redis 时安装 redis
-redis>=5.0
