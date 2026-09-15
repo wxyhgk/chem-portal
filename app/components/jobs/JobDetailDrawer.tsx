@@ -3,7 +3,7 @@
 // 任务详情抽屉：任务页点卡片从右侧滑出，列表保持原位（↑↓ / Esc 由 JobBoard 统一处理）
 import { useEffect, useRef, useState } from "react"
 import type { Job, JobListItem } from "@/shared/schemas/job"
-import { getJob } from "@/lib/api"
+import { NotFoundError, getJob } from "@/lib/api"
 import { useJobStream } from "@/lib/hooks/useJobStream"
 import { isTrajectoryTask } from "@/lib/xyz"
 import { createdMs } from "@/lib/jobGroups"
@@ -75,11 +75,10 @@ export default function JobDetailDrawer(p: JobDetailDrawerProps) {
     getJob(p.jobId)
       .then((j) => {
         if (!alive) return
-        if (!j?.id) return setErr("任务不存在或已被删除")
         remember(j)
         setJob(j)
       })
-      .catch((e) => alive && setErr(String(e?.message || e)))
+      .catch((e) => alive && setErr(e instanceof NotFoundError ? "任务不存在或已被删除" : `加载失败: ${String(e?.message || e)}`))
     return () => {
       alive = false
     }

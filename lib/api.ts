@@ -3,10 +3,19 @@
 // 通过 tsconfig paths 别名 @shared/* 与 @/* 可被 app/page.tsx 直接 import
 
 import type { BatchCreate, BatchSummary, Job, JobCreate, JobListItem, JobStatus, JobTask, JobMethod, PsiMethod } from "@shared/schemas/job";
-import { getApiBase } from "@shared/schemas/job";
+/**
+ * 前端请求一律用同源相对路径 /api/*：由 Next 代理到只监听本机的后端（全站登录保护）。
+ * 不要让浏览器直连后端（会绕过登录）；服务端代理地址见 next.config.mjs 的 API_INTERNAL_URL。
+ */
+export const API_BASE = "";
 
-// 统一基地址 — 与 shared/schemas/job.ts#getApiBase 一致
-export const API_BASE = getApiBase();
+/** 资源不存在（如任务已被彻底删除），调用方据此区分“没有”与“请求失败” */
+export class NotFoundError extends Error {
+  constructor(what: string) {
+    super(`${what} 不存在或已被删除`);
+    this.name = "NotFoundError";
+  }
+}
 
 /** SSE 实时推送地址 — GET /api/jobs/{id}/events（相对路径时走 rewrite 代理） */
 export const jobEventsUrl = (id: string): string => `${API_BASE}/api/jobs/${id}/events`;
@@ -111,6 +120,7 @@ export async function createJob(input: JobCreate): Promise<{ id: string; status:
 
 export async function getJob(id: string): Promise<Job> {
   const r = await fetch(`${API_BASE}/api/jobs/${id}`, { cache: "no-store" });
+  if (r.status === 404) throw new NotFoundError(`任务 ${id}`);
   if (!r.ok) throw new Error(`getJob ${r.status}`);
   return r.json();
 }

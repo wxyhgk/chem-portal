@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import { getJob, jobEventsUrl } from "@/lib/api";
+import { NotFoundError, getJob, jobEventsUrl } from "@/lib/api";
 import type { Job } from "@/shared/schemas/job"
 
 /** SSE 推送的任务补丁（与后端 /api/jobs/{id}/events 字段一致，不含 result_xyz） */
@@ -57,8 +57,9 @@ export function useJobStream(jobId: string | null, opts: StreamOpts) {
             progress_energy: j.progress_energy,
             progress_xyz: j.progress_xyz,
           })
-        } catch {
-          /* 下一轮重试 */
+        } catch (e) {
+          // 任务已被删除：停止轮询；其他错误下一轮重试
+          if (e instanceof NotFoundError) finish("gone")
         }
       }, 3000)
     }

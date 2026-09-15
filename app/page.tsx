@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import type { Job } from "@/shared/schemas/job"
-import { createJob, getJob } from "@/lib/api"
+import { NotFoundError, createJob, getJob } from "@/lib/api"
 import { useJobStream } from "@/lib/hooks/useJobStream"
 import { DEFAULT_PARAMS, paramsFromJob, toApiParams, type JobParams } from "@/lib/jobParams"
 import { isLive } from "@/lib/jobMeta"
@@ -96,7 +96,10 @@ function Portal() {
       setCur(await getJob(id))
       setTab("view3d")
     } catch (e) {
-      console.error(e)
+      if (e instanceof NotFoundError) {
+        setMsg(e.message)
+        refresh()
+      } else console.error(e)
     }
     if (isMobile()) setSideOpen(false)
   }
