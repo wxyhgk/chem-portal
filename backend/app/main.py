@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from pathlib import Path
 
 from .routers.jobs import router as jobs_router
@@ -18,6 +19,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Chem Portal API (decoupled)", version="2.0", lifespan=lifespan)
+
+# JSON 列表字段名重复多，gzip 约压到 1/10；Starlette 默认不压 text/event-stream，SSE 不受影响
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 app.add_middleware(
     CORSMiddleware,

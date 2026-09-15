@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import subprocess
 import tempfile
@@ -6,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ValidationError
 from ..core.config import MAX_JOBS_LIST
 from ..schemas.job import JobIn, BatchIn
@@ -82,8 +83,15 @@ def create_batch(inp: BatchIn):
     return {"batch_id": batch_id, "ids": ids, "count": len(ids)}
 
 @router.get("/jobs")
-def list_jobs(show_deleted: int = 0, batch_id: Optional[str] = None, limit: int = MAX_JOBS_LIST):
-    return svc_list(limit=max(1, min(limit, 5000)), show_deleted=bool(show_deleted), batch_id=batch_id)
+def list_jobs(request: Request, show_deleted: int = 0, batch_id: Optional[str] = None, limit: int = MAX_JOBS_LIST):
+    """任务列表（轻量字段）。带 ETag：前端每 3s 轮询，内容没变回 304，几千条任务也几乎不耗流量"""
+    rows = svc_list(limit=max(1, min(limit, 20000)), show_deleted=bool(show_deleted), batch_id=batch_id)
+    body = json.dumps(rows, ensure_ascii=False, separators=(",", ":")).encode()
+    etag = '"' + hashlib.md5(body).hexdigest() + '"'
+    headers = {"ETag": etag, "Cache-Control": "no-cache"}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    return Response(content=body, media_type="application/json", headers=headers)
 
 @router.get("/batches")
 def list_batches(limit: int = 30):
