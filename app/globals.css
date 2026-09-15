@@ -1,0 +1,6 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+html.dark{color-scheme:dark}
+.mol-viewer{position:relative !important; width:100% !important; height:400px !important; overflow:hidden}
+.mol-viewer canvas{position:absolute !important; top:0; left:0}
