@@ -293,10 +293,11 @@ def run_job(job_id: str):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "input.xyz"
             p.write_text(xyz or "")
-            if task == "opt":
-                cmd = [XTB_BIN, str(p), "--opt", "--chrg", str(charge)]
-            else:
-                cmd = [XTB_BIN, str(p), "--sp", "--chrg", str(charge)]
+            # 必须显式传方法：xtb 不带参数默认 GFN2，此前 gfn1/gfnff 实际都按 GFN2 计算
+            method_flags = {"gfn2": ["--gfn", "2"], "gfn1": ["--gfn", "1"], "gfnff": ["--gfnff"]}.get(method)
+            if method_flags is None:
+                raise ValueError(f"xtb 不支持的方法: {method}")
+            cmd = [XTB_BIN, str(p), "--opt" if task == "opt" else "--sp", "--chrg", str(charge), *method_flags]
             env = os.environ.copy()
             env["OMP_NUM_THREADS"] = str(threads)
             env["MKL_NUM_THREADS"] = str(threads)
