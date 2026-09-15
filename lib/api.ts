@@ -37,6 +37,19 @@ export async function listJobs(showDeleted = false, batchId?: string): Promise<J
   return r.json();
 }
 
+/** 任务页/侧边栏一次拉取的上限（批次最多 2000 个分子，留足余量） */
+export const JOB_LIST_LIMIT = 20000;
+
+/** 条件请求任务列表：内容没变时服务端回 304，返回 items=null（沿用旧数据，也不触发重渲染） */
+export async function listJobsIfChanged(showDeleted: boolean, etag: string | null): Promise<{ items: JobListItem[] | null; etag: string | null }> {
+  const q = new URLSearchParams({ limit: String(JOB_LIST_LIMIT) });
+  if (showDeleted) q.set("show_deleted", "1");
+  const r = await fetch(`${API_BASE}/api/jobs?${q}`, { cache: "no-store", headers: etag ? { "If-None-Match": etag } : {} });
+  if (r.status === 304) return { items: null, etag };
+  if (!r.ok) throw new Error(`listJobs ${r.status}`);
+  return { items: await r.json(), etag: r.headers.get("ETag") };
+}
+
 /** 批量建任务（只入队，后端按并发上限执行） */
 export async function createBatch(input: BatchCreate): Promise<{ batch_id: string; ids: string[]; count: number }> {
   const r = await fetch(`${API_BASE}/api/jobs/batch`, {

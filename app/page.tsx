@@ -1,6 +1,6 @@
 "use client"
-import { useEffect, useState } from "react"
-import { listJobs, createJob, createBatch, getJob, cancelJob, removeJob, restoreJob, clearJobs, API_BASE } from "@/lib/api"
+import { useEffect, useRef, useState } from "react"
+import { listJobsIfChanged, createJob, createBatch, getJob, cancelJob, removeJob, restoreJob, clearJobs, API_BASE } from "@/lib/api"
 import type { Job, JobListItem, JobMethod, JobStatus, JobTask, PsiMethod } from "@/shared/schemas/job"
 import { useViewer } from "@/lib/hooks/useViewer"
 import { useJobStream } from "@/lib/hooks/useJobStream"
@@ -50,7 +50,9 @@ export default function Page(){
 
   const [trash,setTrash]=useState<JobListItem[]>([])
   const [batchFocus,setBatchFocus]=useState<{id:string;n:number}|null>(null)
-  const loadJobs=async()=>{ try{ const [a,b]=await Promise.all([listJobs(),listJobs(true)]); setJobs(a); setTrash(b) }catch(e){ console.error(e) } }
+  // 条件请求：列表没变时服务端回 304，不替换数组引用（任务页/侧边栏不重新分组、不重渲染）
+  const etagRef=useRef<{jobs:string|null; trash:string|null}>({jobs:null, trash:null})
+  const loadJobs=async()=>{ try{ const [a,b]=await Promise.all([listJobsIfChanged(false, etagRef.current.jobs), listJobsIfChanged(true, etagRef.current.trash)]); if(a.items){ setJobs(a.items); etagRef.current.jobs=a.etag } if(b.items){ setTrash(b.items); etagRef.current.trash=b.etag } }catch(e){ console.error(e) } }
   // 克隆重跑：当前任务参数回填表单
   const cloneCur=()=>{ if(!cur) return; const c=cur; setXyz(c.input_xyz||""); setTask((c.task as string)==="md" ? "opt" : c.task); setMethod(c.method as JobMethod); setCharge(c.charge); setThreads(c.threads); if(c.psi_method) setPsiMethod(c.psi_method); if(c.psi_basis) setPsiBasis(c.psi_basis); if(c.multiplicity) setMultiplicity(c.multiplicity); setCur(null); setTab("view3d"); renderXyz(c.input_xyz||""); setMsg(`已载入 ${c.id.slice(0,8)} 参数，修改后提交`) }
   const cancelCur=async()=>{ if(!cur) return; try{ await cancelJob(cur.id); setMsg(`已取消 ${cur.id.slice(0,8)}`) }catch(e:any){ setMsg(`取消失败: ${String(e?.message||e)}`) } }
@@ -129,7 +131,10 @@ export default function Page(){
   useEffect(()=>{
     const s=document.createElement("script"); s.src="https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.1.0/3Dmol-min.js"
     s.onload=()=>setTimeout(()=>initViewer(xyz, document.documentElement.classList.contains("dark")),400); document.head.appendChild(s)
-    loadJobs(); const t=setInterval(loadJobs,3000); return()=>clearInterval(t)
+    // 浏览器标签页在后台时暂停轮询，切回来立即刷新
+    loadJobs(); const t=setInterval(()=>{ if(!document.hidden) loadJobs() },3000)
+    const onVis=()=>{ if(!document.hidden) loadJobs() }; document.addEventListener("visibilitychange", onVis)
+    return()=>{ clearInterval(t); document.removeEventListener("visibilitychange", onVis) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[])
   return <div className={`flex h-screen overflow-hidden bg-white dark:bg-black ${dark?"dark":""}`}>

@@ -1,18 +1,20 @@
 "use client"
 
-// 任务页（主区）：大卡片 / 表格，分组归类 + 多选批量操作
-import { useEffect, useMemo, useState } from "react"
+// 任务页（主区）：大卡片 / 表格，分组归类 + 多选批量操作 + 右侧详情抽屉
+import { useEffect, useMemo, useRef, useState } from "react"
 import type { JobListItem } from "@/shared/schemas/job"
 import { jobImageUrl } from "@/lib/api"
 import { groupJobs, type GroupBy, type JobGroup, type SortBy } from "@/lib/jobGroups"
 import { downloadCsv, jobsToCsv } from "@/lib/csv"
 import { usePrefs } from "@/lib/hooks/usePrefs"
+import JobDetailDrawer from "@/app/components/jobs/JobDetailDrawer"
 import {
   Badge,
   Check,
   CountsText,
   GROUP_OPTIONS,
   JobName,
+  LoadMore,
   METHODS,
   ProgressBar,
   SORT_OPTIONS,
@@ -40,11 +42,15 @@ interface BoardPrefs {
 
 const DEFAULT_PREFS: BoardPrefs = { groupBy: "batch", sortBy: "time", view: "cards", size: "m", collapsed: {} }
 
-const GRID: Record<CardSize, string> = {
-  s: "grid-cols-3 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8",
-  m: "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5",
-  l: "grid-cols-1 sm:grid-cols-2 md:grid-cols-3",
+// 详情抽屉在大屏并排显示，主区变窄 → 列数减少
+const GRID: Record<CardSize, { full: string; narrow: string }> = {
+  s: { full: "grid-cols-3 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8", narrow: "grid-cols-3 xl:grid-cols-5" },
+  m: { full: "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5", narrow: "grid-cols-2 xl:grid-cols-3" },
+  l: { full: "grid-cols-1 sm:grid-cols-2 md:grid-cols-3", narrow: "grid-cols-1 xl:grid-cols-2" },
 }
+
+// 每组首批渲染数量，滚到底自动加载下一批
+const PAGE: Record<BoardView, number> = { cards: 60, table: 200 }
 
 // 小卡片不显示徽章，用文字颜色表示状态（完整类名写死，Tailwind 才能扫描到）
 const STATUS_TEXT: Record<string, string> = {
@@ -60,8 +66,18 @@ const SIZE_OPTIONS: { key: CardSize; label: string }[] = [
   { key: "l", label: "大" },
 ]
 
+const QUICK_SELECT: { key: string; label: string }[] = [
+  { key: "visible", label: "全部可见" },
+  { key: "failed", label: "失败的" },
+  { key: "done", label: "已完成的" },
+  { key: "live", label: "运行中 / 排队" },
+  { key: "cancelled", label: "已取消的" },
+  { key: "invert", label: "反选" },
+  { key: "none", label: "清除选择" },
+]
+
 export interface JobBoardProps {
-  /** 任务页可见时才每秒刷新运行耗时 */
+  /** 任务页可见时才响应快捷键、刷新运行耗时 */
   active: boolean
   jobs: JobListItem[]
   trash: JobListItem[]
@@ -78,6 +94,11 @@ export interface JobBoardProps {
 
 const selectCls = "border rounded-lg px-2 py-1.5 text-xs bg-white dark:bg-zinc-950 dark:border-zinc-800"
 const actCls = "px-2.5 py-1 rounded-lg border text-xs bg-white dark:bg-zinc-900 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-40"
+
+const isTyping = (t: EventTarget | null) => {
+  const el = t as HTMLElement | null
+  return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)
+}
 
 function Segmented<T extends string>({ value, options, onChange }: { value: T; options: { key: T; label: string }[]; onChange: (v: T) => void }) {
   return (
@@ -101,29 +122,33 @@ interface CardProps {
   size: CardSize
   checked: boolean
   selecting: boolean
-  active: boolean
-  onToggle: () => void
-  onOpen: () => void
+  current: boolean
+  opened: boolean
+  onClick: (e: React.MouseEvent) => void
+  onCheck: (shift: boolean) => void
 }
 
-function BoardCard({ j, now, size, checked, selecting, active, onToggle, onOpen }: CardProps) {
+function BoardCard({ j, now, size, checked, selecting, current, opened, onClick, onCheck }: CardProps) {
   const live = isLive(j)
   const src = jobImageUrl(j.id) + (live ? `?t=${Math.floor(now / 10000)}` : "")
   return (
     <div
-      onClick={() => (selecting ? onToggle() : onOpen())}
-      className={`group relative rounded-xl border bg-white dark:bg-zinc-900 overflow-hidden cursor-pointer transition min-w-0 ${
+      id={`job-${j.id}`}
+      onClick={onClick}
+      className={`group relative select-none rounded-xl border bg-white dark:bg-zinc-900 overflow-hidden cursor-pointer transition min-w-0 ${
         checked
           ? "ring-2 ring-blue-500 border-blue-500"
-          : active
-            ? "border-zinc-500 dark:border-zinc-400"
-            : "border-zinc-200 dark:border-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-600"
+          : opened
+            ? "ring-2 ring-zinc-900 dark:ring-zinc-100 border-transparent"
+            : current
+              ? "border-zinc-500 dark:border-zinc-400"
+              : "border-zinc-200 dark:border-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-600"
       }`}
     >
       <div className="relative bg-white border-b border-zinc-100 dark:border-zinc-800">
-        <img src={src} alt={j.name || j.id.slice(0, 8)} loading="lazy" className="w-full h-auto block" />
+        <img src={src} alt={j.name || j.id.slice(0, 8)} loading="lazy" draggable={false} className="w-full h-auto block" />
         <div className={`absolute top-1.5 left-1.5 rounded bg-white/90 p-0.5 transition ${checked || selecting ? "" : "md:opacity-0 md:group-hover:opacity-100"}`}>
-          <Check checked={checked} onChange={onToggle} title="选择" />
+          <Check checked={checked} onChange={(_, shift) => onCheck(shift)} title="选择（Shift 连选）" />
         </div>
       </div>
       <div className="p-2 space-y-0.5">
@@ -142,7 +167,13 @@ function BoardCard({ j, now, size, checked, selecting, active, onToggle, onOpen 
           </div>
         )}
         <div className={`text-[11px] font-mono truncate ${size === "s" ? STATUS_TEXT[statusColor(j.status)] : ""}`}>
-          {live ? `${j.status === "queued" ? "排队" : "运行"} ${elapsedText(j.created_at, now)}` : j.result_energy != null ? `${j.result_energy.toFixed(size === "l" ? 6 : 4)} Eh` : j.status === "done" ? "—" : j.status}
+          {live
+            ? `${j.status === "queued" ? "排队" : "运行"} ${elapsedText(j.created_at, now)}`
+            : j.result_energy != null
+              ? `${j.result_energy.toFixed(size === "l" ? 6 : 4)} ${j.method === "uff" ? "kcal/mol" : "Eh"}`
+              : j.status === "done"
+                ? "—"
+                : j.status}
         </div>
         {size === "l" && (
           <div className="text-[11px] text-zinc-400 truncate">
@@ -158,7 +189,7 @@ function BoardCard({ j, now, size, checked, selecting, active, onToggle, onOpen 
 type SortCol = { key: SortBy; label: string; cls: string }
 const SORT_COLS: Record<string, SortCol> = {
   name: { key: "name", label: "名称", cls: "text-left" },
-  energy: { key: "energy", label: "能量 (Eh)", cls: "text-right" },
+  energy: { key: "energy", label: "能量", cls: "text-right" },
   time: { key: "time", label: "创建时间", cls: "text-left hidden md:table-cell" },
 }
 
@@ -171,6 +202,9 @@ export default function JobBoard(p: JobBoardProps) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
   const [busy, setBusy] = useState("")
   const [now, setNow] = useState(() => Date.now())
+  const [detailId, setDetailId] = useState<string | null>(null)
+  const [limits, setLimits] = useState<Record<string, number>>({})
+  const anchorRef = useRef<string | null>(null)
 
   const source = trashMode ? p.trash : p.jobs
   const hasLive = source.some(isLive)
@@ -183,8 +217,11 @@ export default function JobBoard(p: JobBoardProps) {
     return () => window.clearInterval(t)
   }, [p.active, hasLive])
 
-  // 切换回收站清空选择；数据刷新后去掉已不存在的选中项
-  useEffect(() => setSelected(new Set()), [trashMode])
+  // 切换回收站：清空选择、关闭抽屉；数据刷新后去掉已不存在的选中项 / 详情
+  useEffect(() => {
+    setSelected(new Set())
+    setDetailId(null)
+  }, [trashMode])
   useEffect(() => {
     setSelected((prev) => {
       if (prev.size === 0) return prev
@@ -192,22 +229,26 @@ export default function JobBoard(p: JobBoardProps) {
       const next = new Set([...prev].filter((id) => ids.has(id)))
       return next.size === prev.size ? prev : next
     })
+    setDetailId((id) => (id && !source.some((j) => j.id === id) ? null : id))
   }, [source])
 
-  // Esc 清空选择（输入框内不拦截）
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName
-      if (e.key === "Escape" && tag !== "INPUT" && tag !== "TEXTAREA") setSelected(new Set())
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [])
+  // 视图/筛选变化时分页回到首批
+  useEffect(() => setLimits({}), [prefs.groupBy, prefs.sortBy, prefs.view, statusF, methodF, query, trashMode])
 
   const list = useMemo(() => filterJobs(source, statusF, methodF, query), [source, statusF, methodF, query])
-  // 数据每 3s 轮询刷新，list 随之重算，"今天/昨天"取计算时刻即可
+  // 数据每 3s 轮询（无变化时引用不变），"今天/昨天"取计算时刻即可
   const groups = useMemo(() => groupJobs(list, prefs.groupBy, prefs.sortBy, Date.now()), [list, prefs.groupBy, prefs.sortBy])
   const grouped = prefs.groupBy !== "none"
+  const isCollapsed = (g: JobGroup) => grouped && !!prefs.collapsed[collapseKey(prefs.groupBy, g.key)]
+
+  // 可见顺序（未折叠分组的完整列表，不受分批渲染影响）：范围选择与抽屉上下切换共用
+  const flat = useMemo(
+    () => groups.filter((g) => !(grouped && prefs.collapsed[collapseKey(prefs.groupBy, g.key)])).flatMap((g) => g.jobs),
+    [groups, grouped, prefs.collapsed, prefs.groupBy],
+  )
+  const pageSize = PAGE[prefs.view]
+  const limitOf = (g: JobGroup) => limits[g.key] ?? pageSize
+  const showMore = (key: string) => setLimits((l) => ({ ...l, [key]: (l[key] ?? pageSize) + pageSize }))
 
   const setMany = (ids: string[], on: boolean) =>
     setSelected((prev) => {
@@ -216,9 +257,91 @@ export default function JobBoard(p: JobBoardProps) {
       return n
     })
   const toggleOne = (id: string) => setMany([id], !selected.has(id))
+  const rangeSelect = (fromId: string, toId: string) => {
+    const a = flat.findIndex((j) => j.id === fromId)
+    const b = flat.findIndex((j) => j.id === toId)
+    if (a < 0 || b < 0) return toggleOne(toId)
+    const [lo, hi] = a < b ? [a, b] : [b, a]
+    setMany(flat.slice(lo, hi + 1).map((j) => j.id), true)
+  }
 
-  const isCollapsed = (g: JobGroup) => grouped && !!prefs.collapsed[collapseKey(prefs.groupBy, g.key)]
-  const toggleGroup = (g: JobGroup) => {
+  const handleCheck = (id: string, shift: boolean) => {
+    if (shift && anchorRef.current && anchorRef.current !== id) rangeSelect(anchorRef.current, id)
+    else toggleOne(id)
+    anchorRef.current = id
+  }
+
+  // 点击：Shift 连选；Ctrl/⌘ 或已在选择中 → 切换选择；否则打开详情抽屉
+  const handleItemClick = (e: React.MouseEvent, id: string) => {
+    if (e.shiftKey && anchorRef.current) {
+      rangeSelect(anchorRef.current, id)
+    } else if (e.metaKey || e.ctrlKey || selected.size > 0) {
+      toggleOne(id)
+    } else {
+      setDetailId(id)
+    }
+    anchorRef.current = id
+  }
+
+  // 确保任务已在分批渲染范围内，并滚动到可见
+  const reveal = (id: string) => {
+    const g = groups.find((x) => x.jobs.some((j) => j.id === id))
+    if (!g) return
+    const idx = g.jobs.findIndex((j) => j.id === id)
+    setLimits((l) => ((l[g.key] ?? pageSize) <= idx ? { ...l, [g.key]: idx + pageSize } : l))
+    window.setTimeout(() => document.getElementById(`job-${id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }), 50)
+  }
+
+  const detailIndex = detailId ? flat.findIndex((j) => j.id === detailId) : -1
+  const step = (d: number) => {
+    const n = detailIndex >= 0 ? flat[detailIndex + d] : undefined
+    if (!n) return
+    setDetailId(n.id)
+    anchorRef.current = n.id
+    reveal(n.id)
+  }
+
+  const quickSelect = (key: string) => {
+    const only = (f: (j: JobListItem) => boolean) => setSelected(new Set(list.filter(f).map((j) => j.id)))
+    if (key === "visible") only(() => true)
+    else if (key === "failed") only((j) => j.status === "failed")
+    else if (key === "done") only((j) => j.status === "done")
+    else if (key === "live") only(isLive)
+    else if (key === "cancelled") only((j) => j.status === "cancelled")
+    else if (key === "invert") setSelected((prev) => new Set(list.filter((j) => !prev.has(j.id)).map((j) => j.id)))
+    else if (key === "none") setSelected(new Set())
+  }
+
+  // 快捷键：Esc 先关抽屉再清选择；Ctrl/⌘+A 全选可见；抽屉打开时 ↑↓ / j k 切换
+  const keyHandler = useRef<(e: KeyboardEvent) => void>(() => {})
+  keyHandler.current = (e: KeyboardEvent) => {
+    if (!p.active || isTyping(e.target)) return
+    if (e.key === "Escape") {
+      if (detailId) setDetailId(null)
+      else setSelected(new Set())
+      return
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a") {
+      e.preventDefault()
+      setSelected(new Set(list.map((j) => j.id)))
+      return
+    }
+    if (!detailId || e.metaKey || e.ctrlKey || e.altKey) return
+    if (e.key === "ArrowDown" || e.key === "ArrowRight" || e.key === "j") {
+      e.preventDefault()
+      step(1)
+    } else if (e.key === "ArrowUp" || e.key === "ArrowLeft" || e.key === "k") {
+      e.preventDefault()
+      step(-1)
+    }
+  }
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => keyHandler.current(e)
+    window.addEventListener("keydown", h)
+    return () => window.removeEventListener("keydown", h)
+  }, [])
+
+  const isGroupCollapsedToggle = (g: JobGroup) => {
     const k = collapseKey(prefs.groupBy, g.key)
     update({ collapsed: { ...prefs.collapsed, [k]: !prefs.collapsed[k] } })
   }
@@ -232,17 +355,23 @@ export default function JobBoard(p: JobBoardProps) {
   const selIds = selJobs.map((j) => j.id)
   const selLive = selJobs.filter(isLive)
   const selecting = selected.size > 0
-  const visibleIds = list.map((j) => j.id)
 
-  const run = async (label: string, fn: (ids: string[]) => Promise<void>, ids: string[], confirmText?: string) => {
-    if (ids.length === 0 || (confirmText && !window.confirm(confirmText))) return
+  const run = async (label: string, fn: (ids: string[]) => Promise<void>, ids: string[], confirmText?: string, clearSelection = true) => {
+    if (ids.length === 0 || (confirmText && !window.confirm(confirmText))) return false
     setBusy(label)
     try {
       await fn(ids)
-      setSelected(new Set())
+      if (clearSelection) setSelected(new Set())
+      return true
     } finally {
       setBusy("")
     }
+  }
+
+  // 抽屉里删除/彻底删除后自动切到相邻任务，方便连续处理
+  const removeFromDrawer = async (label: string, fn: (ids: string[]) => Promise<void>, id: string, confirmText: string) => {
+    const next = flat[detailIndex + 1] || flat[detailIndex - 1]
+    if (await run(label, fn, [id], confirmText, false)) setDetailId(next ? next.id : null)
   }
 
   const exportSelected = () => downloadCsv(`jobs-${new Date().toISOString().slice(0, 10)}-${selJobs.length}.csv`, jobsToCsv(selJobs))
@@ -263,7 +392,7 @@ export default function JobBoard(p: JobBoardProps) {
   )
 
   return (
-    <div className="space-y-3">
+    <div className={`space-y-3 ${detailId ? "lg:mr-[496px]" : ""}`}>
       <div className="bg-white dark:bg-zinc-900 rounded-xl border dark:border-zinc-800 shadow-sm p-3 space-y-2">
         <div className="flex flex-wrap items-center gap-2">
           <div className="text-sm font-semibold">{trashMode ? "回收站" : "任务"}</div>
@@ -330,6 +459,24 @@ export default function JobBoard(p: JobBoardProps) {
             onChange={(v) => update({ view: v })}
           />
           {prefs.view === "cards" && <Segmented<CardSize> value={prefs.size} options={SIZE_OPTIONS} onChange={(v) => update({ size: v })} />}
+          <select
+            value=""
+            onChange={(e) => {
+              quickSelect(e.target.value)
+              e.target.value = ""
+            }}
+            className={selectCls}
+            title="快速选择（Ctrl/⌘+A 全选，Shift 点击连选）"
+          >
+            <option value="" disabled>
+              快速选择…
+            </option>
+            {QUICK_SELECT.map((o) => (
+              <option key={o.key} value={o.key}>
+                {o.label}
+              </option>
+            ))}
+          </select>
           <span className="ml-auto flex items-center gap-2 text-xs text-zinc-500">
             {grouped && groups.length > 1 && (
               <>
@@ -341,17 +488,17 @@ export default function JobBoard(p: JobBoardProps) {
                 </button>
               </>
             )}
-            {list.length > 0 && (
-              <button onClick={() => setMany(visibleIds, true)} className="hover:text-black dark:hover:text-white">
-                全选 {list.length}
-              </button>
-            )}
           </span>
+        </div>
+        <div className="hidden md:block text-[11px] text-zinc-400">
+          点卡片看详情（↑↓ 切换，Esc 关闭）· Ctrl/⌘ 点击多选 · Shift 点击连选 · Ctrl/⌘+A 全选
         </div>
       </div>
 
       {groups.map((g) => {
         const collapsed = isCollapsed(g)
+        const limit = limitOf(g)
+        const shown = g.jobs.slice(0, limit)
         return (
           <section key={g.key} className="bg-white dark:bg-zinc-900 rounded-xl border dark:border-zinc-800 shadow-sm">
             {grouped && (
@@ -361,7 +508,7 @@ export default function JobBoard(p: JobBoardProps) {
                 }`}
               >
                 {groupCheck(g)}
-                <button onClick={() => toggleGroup(g)} className="flex items-center gap-1 text-sm font-medium min-w-0" title={g.batchId ? `批次 ${g.batchId}` : g.label}>
+                <button onClick={() => isGroupCollapsedToggle(g)} className="flex items-center gap-1 text-sm font-medium min-w-0" title={g.batchId ? `批次 ${g.batchId}` : g.label}>
                   <span className="w-3 text-zinc-400">{collapsed ? "▸" : "▾"}</span>
                   <span className="truncate">{g.label}</span>
                 </button>
@@ -379,8 +526,8 @@ export default function JobBoard(p: JobBoardProps) {
             )}
             {!collapsed &&
               (prefs.view === "cards" ? (
-                <div className={`grid gap-3 p-3 ${GRID[prefs.size]}`}>
-                  {g.jobs.map((j) => (
+                <div className={`grid gap-3 p-3 ${detailId ? GRID[prefs.size].narrow : GRID[prefs.size].full}`}>
+                  {shown.map((j) => (
                     <BoardCard
                       key={j.id}
                       j={j}
@@ -388,18 +535,29 @@ export default function JobBoard(p: JobBoardProps) {
                       size={prefs.size}
                       checked={selected.has(j.id)}
                       selecting={selecting}
-                      active={p.curId === j.id}
-                      onToggle={() => toggleOne(j.id)}
-                      onOpen={() => p.onSelect(j.id)}
+                      current={p.curId === j.id}
+                      opened={detailId === j.id}
+                      onClick={(e) => handleItemClick(e, j.id)}
+                      onCheck={(shift) => handleCheck(j.id, shift)}
                     />
                   ))}
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
+                  {/* table-fixed + 固定列宽：各分组表格列对齐 */}
+                  <table className="w-full text-xs table-fixed">
+                    <colgroup>
+                      <col className="w-10" />
+                      <col />
+                      <col className="w-24" />
+                      <col className="w-28 hidden sm:table-column" />
+                      <col className="w-36" />
+                      <col className="w-20 hidden sm:table-column" />
+                      <col className="w-40 hidden md:table-column" />
+                    </colgroup>
                     <thead className="text-zinc-500">
                       <tr className="border-b dark:border-zinc-800">
-                        <th className="p-2 w-8">{!grouped && groupCheck(g)}</th>
+                        <th className="p-2">{!grouped && groupCheck(g)}</th>
                         {sortHeader(SORT_COLS.name)}
                         <th className="p-2 font-normal text-left">状态</th>
                         <th className="p-2 font-normal text-left hidden sm:table-cell">任务/方法</th>
@@ -409,18 +567,25 @@ export default function JobBoard(p: JobBoardProps) {
                       </tr>
                     </thead>
                     <tbody>
-                      {g.jobs.map((j) => (
+                      {shown.map((j) => (
                         <tr
                           key={j.id}
-                          onClick={() => (selecting ? toggleOne(j.id) : p.onSelect(j.id))}
-                          className={`border-b last:border-b-0 dark:border-zinc-800 cursor-pointer ${
-                            selected.has(j.id) ? "bg-blue-50 dark:bg-blue-950" : p.curId === j.id ? "bg-zinc-50 dark:bg-zinc-800" : "hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                          id={`job-${j.id}`}
+                          onClick={(e) => handleItemClick(e, j.id)}
+                          className={`select-none border-b last:border-b-0 dark:border-zinc-800 cursor-pointer ${
+                            selected.has(j.id)
+                              ? "bg-blue-50 dark:bg-blue-950"
+                              : detailId === j.id
+                                ? "bg-zinc-100 dark:bg-zinc-800"
+                                : p.curId === j.id
+                                  ? "bg-zinc-50 dark:bg-zinc-800/60"
+                                  : "hover:bg-zinc-50 dark:hover:bg-zinc-800"
                           }`}
                         >
                           <td className="p-2 text-center">
-                            <Check checked={selected.has(j.id)} onChange={() => toggleOne(j.id)} />
+                            <Check checked={selected.has(j.id)} onChange={(_, shift) => handleCheck(j.id, shift)} />
                           </td>
-                          <td className="p-2 max-w-[16rem]">
+                          <td className="p-2">
                             <div className="flex items-center gap-1 min-w-0">
                               <JobName j={j} className="text-xs" />
                               {j.batch_id && !grouped && <span title={`批次 ${j.batch_id}`}>📦</span>}
@@ -429,20 +594,21 @@ export default function JobBoard(p: JobBoardProps) {
                           <td className="p-2">
                             <Badge color={statusColor(j.status)}>{j.status}</Badge>
                           </td>
-                          <td className="p-2 text-zinc-500 hidden sm:table-cell">
+                          <td className="p-2 text-zinc-500 hidden sm:table-cell truncate">
                             {j.task}/{j.method || "gfn2"}
                           </td>
-                          <td className="p-2 text-right font-mono">
+                          <td className="p-2 text-right font-mono truncate">
                             {isLive(j) ? <span className="text-yellow-600">{elapsedText(j.created_at, now)}</span> : j.result_energy?.toFixed(6) ?? "—"}
                           </td>
                           <td className="p-2 text-right hidden sm:table-cell">{j.wall_time != null ? `${j.wall_time.toFixed(1)}s` : "—"}</td>
-                          <td className="p-2 text-zinc-400 hidden md:table-cell whitespace-nowrap">{j.created_at}</td>
+                          <td className="p-2 text-zinc-400 hidden md:table-cell truncate">{j.created_at}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
               ))}
+            {!collapsed && g.jobs.length > limit && <LoadMore remaining={g.jobs.length - limit} onMore={() => showMore(g.key)} />}
           </section>
         )
       })}
@@ -457,8 +623,11 @@ export default function JobBoard(p: JobBoardProps) {
         <div className="sticky bottom-0 z-20 pt-2">
           <div className="mx-auto max-w-4xl flex flex-wrap items-center gap-2 rounded-xl border dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-lg px-3 py-2 text-xs">
             <span className="font-medium">已选 {selected.size}</span>
-            <button onClick={() => setMany(visibleIds, true)} className="text-zinc-500 hover:text-black dark:hover:text-white">
+            <button onClick={() => quickSelect("visible")} className="text-zinc-500 hover:text-black dark:hover:text-white">
               全选可见
+            </button>
+            <button onClick={() => quickSelect("invert")} className="text-zinc-500 hover:text-black dark:hover:text-white">
+              反选
             </button>
             <button onClick={() => setSelected(new Set())} className="text-zinc-500 hover:text-black dark:hover:text-white">
               清除 (Esc)
@@ -511,6 +680,27 @@ export default function JobBoard(p: JobBoardProps) {
             </span>
           </div>
         </div>
+      )}
+
+      {detailId && (
+        <JobDetailDrawer
+          jobId={detailId}
+          item={source.find((j) => j.id === detailId)}
+          index={detailIndex}
+          total={flat.length}
+          trashMode={trashMode}
+          busy={busy}
+          onClose={() => setDetailId(null)}
+          onPrev={() => step(-1)}
+          onNext={() => step(1)}
+          onOpen3D={p.onSelect}
+          onOpenBatch={p.onOpenBatch}
+          onRerun={(id) => run("重跑", p.onRerunMany, [id], "按原参数重跑这个任务？（作为新批次提交，原任务保留）", false)}
+          onCancel={(id) => run("取消", p.onCancelMany, [id], "取消这个任务？", false)}
+          onDelete={(id) => removeFromDrawer("删除", p.onDeleteMany, id, "把这个任务移入回收站？（可恢复）")}
+          onRestore={(id) => removeFromDrawer("恢复", p.onRestoreMany, id, "恢复这个任务？")}
+          onHardDelete={(id) => removeFromDrawer("彻底删除", p.onHardDeleteMany, id, "彻底删除这个任务？此操作不可恢复。")}
+        />
       )}
     </div>
   )

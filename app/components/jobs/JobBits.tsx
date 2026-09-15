@@ -119,8 +119,20 @@ export function ProgressBar({ counts, total, className }: { counts: GroupCounts;
   )
 }
 
-/** 支持半选态的复选框；点击不冒泡（卡片点击另有含义） */
-export function Check({ checked, indeterminate, onChange, title, className = "" }: { checked: boolean; indeterminate?: boolean; onChange: (v: boolean) => void; title?: string; className?: string }) {
+/** 支持半选态的复选框；点击不冒泡（卡片点击另有含义），回调带 shift 以支持范围选择 */
+export function Check({
+  checked,
+  indeterminate,
+  onChange,
+  title,
+  className = "",
+}: {
+  checked: boolean
+  indeterminate?: boolean
+  onChange: (v: boolean, shift: boolean) => void
+  title?: string
+  className?: string
+}) {
   const ref = useRef<HTMLInputElement>(null)
   useEffect(() => {
     if (ref.current) ref.current.indeterminate = !!indeterminate && !checked
@@ -130,11 +142,35 @@ export function Check({ checked, indeterminate, onChange, title, className = "" 
       ref={ref}
       type="checkbox"
       checked={checked}
+      readOnly
       title={title}
-      onChange={(e) => onChange(e.target.checked)}
-      onClick={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation()
+        onChange(!checked, e.shiftKey)
+      }}
       className={`w-4 h-4 cursor-pointer accent-black dark:accent-white ${className}`}
     />
+  )
+}
+
+/** 分批渲染：接近底部自动加载下一批，也可手动点 */
+export function LoadMore({ remaining, onMore }: { remaining: number; onMore: () => void }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const cb = useRef(onMore)
+  cb.current = onMore
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const io = new IntersectionObserver((es) => es.some((e) => e.isIntersecting) && cb.current(), { rootMargin: "600px" })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [remaining])
+  return (
+    <div ref={ref} className="py-3 text-center">
+      <button onClick={() => cb.current()} className="text-xs text-zinc-500 hover:text-black dark:hover:text-white">
+        显示更多（还有 {remaining} 个）
+      </button>
+    </div>
   )
 }
 

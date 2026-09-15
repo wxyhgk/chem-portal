@@ -12,6 +12,7 @@ import {
   CountsText,
   GROUP_OPTIONS,
   JobName,
+  LoadMore,
   METHODS,
   ProgressBar,
   SORT_OPTIONS,
@@ -55,6 +56,9 @@ interface Prefs {
   collapsed: Record<string, boolean>
 }
 const DEFAULT_PREFS: Prefs = { groupBy: "batch", sortBy: "time", view: "cards", collapsed: {} }
+
+// 侧边栏每组首批渲染数量（任务多时滚到底自动加载）
+const SIDEBAR_PAGE = 40
 
 interface ItemProps {
   j: JobListItem
@@ -252,6 +256,8 @@ export default function JobList({
   const [methodF, setMethodF] = useState("all")
   const [trashMode, setTrashMode] = useState(false)
   const [prefs, updatePrefs] = usePrefs<Prefs>("jobList.prefs.v1", DEFAULT_PREFS, pruneCollapsed)
+  const [limits, setLimits] = useState<Record<string, number>>({})
+  useEffect(() => setLimits({}), [prefs.groupBy, prefs.sortBy, prefs.view, statusF, methodF, query, trashMode])
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     const t = window.setInterval(() => setNow(Date.now()), 1000)
@@ -421,17 +427,23 @@ export default function JobList({
               {!collapsed &&
                 (prefs.view === "cards" ? (
                   <div className="grid grid-cols-2 gap-2 content-start pt-2">
-                    {g.jobs.map((j) => (
+                    {g.jobs.slice(0, limits[g.key] ?? SIDEBAR_PAGE).map((j) => (
                       <JobCard key={j.id} {...itemProps(j)} />
                     ))}
                   </div>
                 ) : (
                   <div className="space-y-1 pt-1">
-                    {g.jobs.map((j) => (
+                    {g.jobs.slice(0, limits[g.key] ?? SIDEBAR_PAGE).map((j) => (
                       <JobRow key={j.id} {...itemProps(j)} />
                     ))}
                   </div>
                 ))}
+              {!collapsed && g.jobs.length > (limits[g.key] ?? SIDEBAR_PAGE) && (
+                <LoadMore
+                  remaining={g.jobs.length - (limits[g.key] ?? SIDEBAR_PAGE)}
+                  onMore={() => setLimits((l) => ({ ...l, [g.key]: (l[g.key] ?? SIDEBAR_PAGE) + SIDEBAR_PAGE }))}
+                />
+              )}
             </section>
           )
         })}

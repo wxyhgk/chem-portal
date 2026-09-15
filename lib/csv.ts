@@ -1,5 +1,6 @@
 // 任务结果导出 CSV（批量页 / 任务页多选共用）
 import type { JobListItem } from "@/shared/schemas/job"
+import { downloadText } from "@/lib/download"
 
 function cell(v: unknown): string {
   const s = v === null || v === undefined ? "" : String(v)
@@ -12,12 +13,6 @@ export function jobsToCsv(jobs: JobListItem[]): string {
   return [head, ...rows].map((r) => r.map(cell).join(",")).join("\n")
 }
 
-/** 触发浏览器下载；带 BOM 让 Excel 正确识别 UTF-8 中文名 */
 export function downloadCsv(filename: string, csv: string) {
-  const url = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }))
-  const a = document.createElement("a")
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
+  downloadText(filename, csv, "text/csv;charset=utf-8", true)
 }
