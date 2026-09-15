@@ -3,7 +3,7 @@
 import type { Job } from "@/shared/schemas/job"
 import Button from "@/app/components/ui/Button"
 
-export type TabKey = "view3d" | "xyz" | "log" | "batch"
+export type TabKey = "view3d" | "xyz" | "log" | "jobs" | "batch"
 
 export interface HeaderTabsProps {
   tab: TabKey
@@ -22,8 +22,11 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "view3d", label: "🧬 3D" },
   { key: "xyz", label: "XYZ" },
   { key: "log", label: "日志" },
+  { key: "jobs", label: "📋 任务" },
   { key: "batch", label: "📦 批量" },
 ]
+
+export const TAB_KEYS: TabKey[] = TABS.map((t) => t.key)
 
 export default function HeaderTabs({ tab, onTab, sideOpen, onToggleSide, cur, dark, onToggleDark, onClone, onCancel, onDelete }: HeaderTabsProps) {
   return (
@@ -33,12 +36,12 @@ export default function HeaderTabs({ tab, onTab, sideOpen, onToggleSide, cur, da
           ☰
         </Button>
       )}
-      <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-900 rounded-lg p-1">
+      <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-900 rounded-lg p-1 min-w-0 overflow-x-auto">
         {TABS.map((t) => (
           <button
             key={t.key}
             onClick={() => onTab(t.key)}
-            className={`px-3 py-1.5 rounded-md text-sm ${tab === t.key ? "bg-white dark:bg-zinc-800 shadow" : "text-zinc-500"}`}
+            className={`px-3 py-1.5 rounded-md text-sm whitespace-nowrap ${tab === t.key ? "bg-white dark:bg-zinc-800 shadow" : "text-zinc-500"}`}
           >
             {t.label}
           </button>

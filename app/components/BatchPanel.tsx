@@ -5,6 +5,7 @@ import type { BatchSummary, JobListItem, JobMethod, JobStatus, JobTask, PsiMetho
 import { cancelJob, createBatch, embedSdf, listBatches, listJobs } from "@/lib/api"
 import { splitSdf } from "@/lib/sdf"
 import { runPool } from "@/lib/pool"
+import { downloadCsv, jobsToCsv } from "@/lib/csv"
 import Button from "@/app/components/ui/Button"
 import { BaseParamFields, PsiParamFields } from "@/app/components/JobParamsFields"
 
@@ -58,10 +59,6 @@ const STATUS_CLS: Record<string, string> = {
 
 const ITEM_LABEL: Record<ItemStatus, string> = { embedding: "生成3D…", ready: "就绪", error: "失败" }
 
-function csvCell(v: unknown): string {
-  const s = v === null || v === undefined ? "" : String(v)
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-}
 
 export default function BatchPanel(p: BatchPanelProps) {
   const fileRef = useRef<HTMLInputElement>(null)
@@ -216,17 +213,7 @@ export default function BatchPanel(p: BatchPanelProps) {
     refreshBatches()
   }
 
-  const exportCsv = () => {
-    const head = ["name", "id", "status", "method", "task", "charge", "energy_Eh", "wall_time_s", "created_at"]
-    const rows = batchJobs.map((j) => [j.name, j.id, j.status, j.method, j.task, j.charge, j.result_energy, j.wall_time?.toFixed(2), j.created_at])
-    const csv = [head, ...rows].map((r) => r.map(csvCell).join(",")).join("\n")
-    const url = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }))
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `batch-${batchId}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
+  const exportCsv = () => downloadCsv(`batch-${batchId}.csv`, jobsToCsv(batchJobs))
 
   return (
     <div className="space-y-4">

@@ -1,6 +1,6 @@
 "use client"
 import { useEffect, useState } from "react"
-import { listJobs, createJob, getJob, cancelJob, removeJob, restoreJob, clearJobs, API_BASE } from "@/lib/api"
+import { listJobs, createJob, createBatch, getJob, cancelJob, removeJob, restoreJob, clearJobs, API_BASE } from "@/lib/api"
 import type { Job, JobListItem, JobMethod, JobStatus, JobTask, PsiMethod } from "@/shared/schemas/job"
 import { useViewer } from "@/lib/hooks/useViewer"
 import { useJobStream } from "@/lib/hooks/useJobStream"
@@ -9,7 +9,8 @@ import { runPool } from "@/lib/pool"
 import JobList from "@/app/components/JobList"
 import SubmitForm from "@/app/components/SubmitForm"
 import Viewer3D from "@/app/components/Viewer3D"
-import HeaderTabs, { type TabKey } from "@/app/components/HeaderTabs"
+import HeaderTabs, { TAB_KEYS, type TabKey } from "@/app/components/HeaderTabs"
+import JobBoard from "@/app/components/JobBoard"
 import XyzPanel from "@/app/components/XyzPanel"
 import LogPanel from "@/app/components/LogPanel"
 import BatchPanel from "@/app/components/BatchPanel"
@@ -37,6 +38,8 @@ export default function Page(){
   })
 
   useEffect(()=>{ if(window.innerWidth<768) setSideOpen(false) },[])
+  // ?tab=jobs 直接打开指定标签页（便于分享链接）
+  useEffect(()=>{ const t=new URLSearchParams(window.location.search).get("tab") as TabKey|null; if(t && TAB_KEYS.includes(t)) setTab(t) },[])
   useEffect(()=>{ const t=localStorage.getItem("theme"); if(t==="dark"){document.documentElement.classList.add("dark"); setDark(true)} },[])
   const toggleDark=()=>{
     const nd=!dark; setDark(nd)
@@ -58,6 +61,36 @@ export default function Page(){
   // 侧边栏分组整理：整组移入回收站（软删，可恢复）
   const deleteMany=async(ids:string[])=>{ let n=0; await runPool(ids,8,async(id)=>{ try{ await removeJob(id); n++ }catch(e){ console.error(e) } }); if(cur && ids.includes(cur.id)) setCur(null); loadJobs(); setMsg(`已移入回收站 ${n}/${ids.length} 个`) }
   const openBatch=(id:string)=>{ setBatchFocus({id, n:Date.now()}); setTab("batch"); if(window.innerWidth<768) setSideOpen(false) }
+  const openJobsTab=()=>{ setTab("jobs"); if(window.innerWidth<768) setSideOpen(false) }
+  // 任务页多选批量操作
+  const eachId=async(ids:string[], fn:(id:string)=>Promise<unknown>)=>{ let n=0; await runPool(ids,8,async(id)=>{ try{ await fn(id); n++ }catch(e){ console.error(e) } }); return n }
+  const cancelMany=async(ids:string[])=>{ const n=await eachId(ids, cancelJob); loadJobs(); setMsg(`已取消 ${n}/${ids.length} 个`) }
+  const restoreMany=async(ids:string[])=>{ const n=await eachId(ids, restoreJob); loadJobs(); setMsg(`已恢复 ${n}/${ids.length} 个`) }
+  const hardDeleteMany=async(ids:string[])=>{ const n=await eachId(ids, (id)=>removeJob(id,true)); if(cur && ids.includes(cur.id)) setCur(null); loadJobs(); setMsg(`已彻底删除 ${n}/${ids.length} 个`) }
+  // 按原参数重跑：拉详情取 input_xyz，参数相同的合成一个新批次（走批量调度限并发），原任务保留
+  const rerunMany=async(ids:string[])=>{
+    const details:Job[]=[]
+    await eachId(ids, async(id)=>{ const j=await getJob(id); if(j?.input_xyz) details.push(j) })
+    const order=new Map(ids.map((id,i)=>[id,i])); details.sort((a,b)=>(order.get(a.id)??0)-(order.get(b.id)??0))
+    const byParams=new Map<string,Job[]>()
+    for(const j of details){
+      const k=JSON.stringify([j.method, (j.task as string)==="md"?"opt":j.task, j.threads, j.method==="psi4"?[j.psi_method,j.psi_basis,j.multiplicity]:null])
+      byParams.set(k,[...(byParams.get(k)||[]), j])
+    }
+    let n=0, batches=0, err=""
+    for(const js of byParams.values()){
+      const j0=js[0]
+      try{
+        const r=await createBatch({
+          items: js.map(j=>({ xyz:j.input_xyz, name:j.name||j.id.slice(0,8), charge:j.charge })),
+          method:j0.method, task:(j0.task as string)==="md"?"opt":j0.task, threads:Math.min(32,Math.max(1,j0.threads||4)),
+          ...(j0.method==="psi4" ? { psi_method:j0.psi_method||"b3lyp", psi_basis:j0.psi_basis||"def2-SVP", multiplicity:j0.multiplicity||1 } : {}),
+        })
+        n+=r.count; batches++
+      }catch(e:any){ err=String(e?.message||e) }
+    }
+    loadJobs(); setMsg(`已重跑 ${n}/${ids.length} 个（${batches} 个新批次）${err?` · 部分失败: ${err}`:""}`)
+  }
   const clearBy=async(statuses:JobStatus[])=>{ try{ const r=await clearJobs(statuses); loadJobs(); setMsg(`已清理 ${r.cleared} 个任务`) }catch(e:any){ setMsg(`清理失败: ${String(e?.message||e)}`) } }
   const handleTaskChange=(v:JobTask)=>{ setTask(v) }
   const submit=async()=>{
@@ -106,7 +139,7 @@ export default function Page(){
         <span className="font-bold text-sm">Chem Portal</span>
         <button onClick={()=>setSideOpen(false)} className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded">✕</button>
       </div>
-      <JobList jobs={jobs} trash={trash} curId={cur?.id ?? null} onSelect={show} onNew={()=>{setCur(null); setXyz(""); setTab("view3d"); renderXyz("")}} onDelete={deleteOne} onRestore={restoreOne} onHardDelete={hardDeleteOne} onClear={clearBy} onOpenBatch={openBatch} onDeleteMany={deleteMany} apiHint={API_BASE || "/api代理"} />
+      <JobList jobs={jobs} trash={trash} curId={cur?.id ?? null} onSelect={show} onNew={()=>{setCur(null); setXyz(""); setTab("view3d"); renderXyz("")}} onDelete={deleteOne} onRestore={restoreOne} onHardDelete={hardDeleteOne} onClear={clearBy} onOpenBatch={openBatch} onDeleteMany={deleteMany} onExpand={openJobsTab} apiHint={API_BASE || "/api代理"} />
     </aside>
 
     {/* 主区 */}
@@ -115,7 +148,15 @@ export default function Page(){
 
       {/* 中间内容区 */}
       <div className="flex-1 overflow-auto bg-zinc-50 dark:bg-black p-3 md:p-6">
-        <div className="max-w-5xl mx-auto space-y-4">
+        <div className={`${tab==="jobs"?"max-w-7xl":"max-w-5xl"} mx-auto space-y-4`}>
+          {/* 任务 tab：隐藏而非卸载，保留筛选/选择状态（点卡片看 3D 后可回来继续操作） */}
+          <div className={tab==="jobs"?"":"hidden"}>
+            <JobBoard active={tab==="jobs"} jobs={jobs} trash={trash} curId={cur?.id ?? null} msg={msg}
+              onSelect={show} onOpenBatch={openBatch}
+              onCancelMany={cancelMany} onDeleteMany={deleteMany} onRestoreMany={restoreMany}
+              onHardDeleteMany={hardDeleteMany} onRerunMany={rerunMany} />
+          </div>
+
           {/* 批量 tab：隐藏而非卸载，保留已拖入的文件列表 */}
           <div className={tab==="batch"?"":"hidden"}>
             <BatchPanel active={tab==="batch"} task={task} method={method}
@@ -125,14 +166,14 @@ export default function Page(){
               onSelect={show} onSubmitted={loadJobs} focusBatch={batchFocus} />
           </div>
 
-          {tab!=="batch" && <SubmitForm xyz={xyz} task={task} method={method} charge={charge} threads={threads}
+          {tab!=="batch" && tab!=="jobs" && <SubmitForm xyz={xyz} task={task} method={method} charge={charge} threads={threads}
             psiMethod={psiMethod} psiBasis={psiBasis} multiplicity={multiplicity} msg={msg}
             onXyzChange={v=>{setXyz(v); renderXyz(v)}} onTaskChange={handleTaskChange} onMethodChange={setMethod}
             onChargeChange={setCharge} onThreadsChange={setThreads} onPsiMethodChange={setPsiMethod}
             onPsiBasisChange={setPsiBasis} onMultiplicityChange={setMultiplicity} onSubmit={submit} />}
 
           {/* 优化过程展示区 - 根据 tab 切换（批量 tab 下隐藏，viewer 不卸载） */}
-          <div className={`bg-white dark:bg-zinc-900 rounded-xl border dark:border-zinc-800 shadow-sm overflow-hidden ${tab==="batch"?"hidden":""}`}>
+          <div className={`bg-white dark:bg-zinc-900 rounded-xl border dark:border-zinc-800 shadow-sm overflow-hidden ${tab==="batch"||tab==="jobs"?"hidden":""}`}>
             <div className={tab==="view3d"?"":"hidden"}>
               <Viewer3D cur={cur} frames={frames} frame={frame} viewerErr={viewerErr} debug={debug} viewerElRef={viewerElRef}
                 onPlay={play} onPause={pause} onReset={reset} onFrameChange={goToFrame} />

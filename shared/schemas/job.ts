@@ -77,11 +77,11 @@ export type JobListItem = Pick<Job, "id" | "status" | "method" | "charge" | "thr
 /** 单个任务详情 — GET /api/jobs/{id} */
 export type JobDetail = Job;
 
-export const getApiBase = (): string => {
-  if (typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL
-  if (typeof window !== "undefined") return ""
-  return "http://CHEM_PORTAL_HOST:18081"
-}
+/**
+ * 前端请求一律用同源相对路径 /api/*：由 Next 代理到只监听本机的后端（全站登录保护）。
+ * 不要再用 NEXT_PUBLIC_API_URL 让浏览器直连后端 —— 那会绕过登录。服务端代理地址见 API_INTERNAL_URL。
+ */
+export const getApiBase = (): string => ""
 
 // 示例导入 (chem-portal-web 中):
 // import type { Job, JobCreate, JobStatus } from "../../../chem-portal/shared/schemas/job";

@@ -1,5 +1,5 @@
 // lib/api.ts — 前端统一 API 封装（契约来源: @shared/schemas/job.ts）
-// 基地址代理优先：默认相对路径 /api/*（next.config.mjs rewrite 到后端），仅显式设置 NEXT_PUBLIC_API_URL 时直连
+// 基地址固定为同源相对路径 /api/*：next.config.mjs rewrite 到只监听本机的后端，middleware.ts 做登录保护
 // 通过 tsconfig paths 别名 @shared/* 与 @/* 可被 app/page.tsx 直接 import
 
 import type { BatchCreate, BatchSummary, Job, JobCreate, JobListItem, JobStatus, JobTask, JobMethod, PsiMethod } from "@shared/schemas/job";

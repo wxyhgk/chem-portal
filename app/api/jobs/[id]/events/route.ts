@@ -5,7 +5,7 @@
  */
 export const dynamic = "force-dynamic";
 
-const BACKEND = process.env.NEXT_PUBLIC_API_URL || "http://CHEM_PORTAL_HOST:18081";
+const BACKEND = process.env.API_INTERNAL_URL || "http://127.0.0.1:18081";
 
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   let upstream: Response;
