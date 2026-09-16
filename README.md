@@ -1,5 +1,7 @@
 # Chem Portal 后端 - 计算化学任务 API
 
+[![CI](https://github.com/wxyhgk/chem-portal/actions/workflows/ci.yml/badge.svg)](https://github.com/wxyhgk/chem-portal/actions/workflows/ci.yml)
+
 单仓：根目录是后端与计算层，`web/` 是 Next.js 前端。浏览器只访问前端，前端把 `/api/*` 代理到本服务（后端只监听本机）。
 
 ## 目录
@@ -12,6 +14,8 @@
 - `database/` SQLite 库（`chem.db` 不入 git；`schema.sql` 仅作参考）
 - `scripts/backup_db.sh` 数据库每日备份（systemd `chem-portal-backup.timer`）
 - `web/` Next.js 前端（全站 Basic Auth，`/api/*` 代理到本服务）
+- `tests/` 几何分析冒烟测试（只用标准库）：`PYTHONPATH=. python -m unittest discover -s tests`
+- `.github/workflows/ci.yml` CI：契约一致性、shared 未漂移、几何测试、前端 tsc 与生产构建
 
 ## 运行（systemd）
 - `chem-portal-api.service`：`uvicorn backend.app.main:app --host 127.0.0.1 --port 18081`，`WorkingDirectory` 与 `PYTHONPATH` 为本目录
