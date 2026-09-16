@@ -52,6 +52,15 @@ jobs:
         working-directory: web
         run: npm ci
 
+      - name: 缓存 Next 构建产物
+        uses: actions/cache@v4
+        with:
+          path: web/.next/cache
+          # 依赖变了就重建缓存；源码变了在旧缓存上增量构建
+          key: next-${{ hashFiles('web/package-lock.json') }}-${{ hashFiles('web/app/**', 'web/lib/**', 'web/shared/**', 'web/*.ts', 'web/*.mjs', 'web/*.js') }}
+          restore-keys: |
+            next-${{ hashFiles('web/package-lock.json') }}-
+
       - name: 类型检查
         working-directory: web
         run: npx tsc --noEmit
