@@ -3,3 +3,4 @@ uvicorn
 pydantic>=2
 # 化学工具（SDF 转 3D、结构图、UFF）；psi4 与 cclib 在独立 conda 环境（compute.config.PSI4_PYTHON）
 rdkit
+numpy  # compute/geometry/planes.py 的最小二乘平面（rdkit 也依赖它）

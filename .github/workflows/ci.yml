@@ -18,7 +18,7 @@ jobs:
           python-version: "3.12"
 
       - name: 安装依赖（只装契约生成需要的，不装 rdkit/xtb）
-        run: pip install "pydantic>=2" annotated-types
+        run: pip install "pydantic>=2" annotated-types numpy   # numpy: compute.geometry 拟合平面算夹角
 
       - name: 语法检查
         run: python -m compileall -q backend compute scripts shared tests
