@@ -131,6 +131,17 @@ class GeometryAtom(BaseModel):
     neighbors: str = Field(default="", description="邻居元素统计，如 C4")
 
 
+class GeometryFragment(BaseModel):
+    """可整体高亮的片段：在螺原子处或非环单键处断开得到的挂接环系"""
+    kind: Literal["spiro", "bond"] = Field(..., description="断开位置：螺原子 / 单键")
+    anchor: int = Field(..., description="片段内与主体相连的原子（1 基）")
+    partner: Optional[int] = Field(default=None, description="主体一侧的原子（单键时）")
+    indexes: list[int] = Field(default_factory=list, description="片段全部原子（1 基，含 anchor）")
+    heavy: int = Field(default=0, description="重原子数")
+    formula: str = ""
+    tilt_deg: Optional[float] = Field(default=None, description="与主体平面夹角：0 共面，90 垂直")
+
+
 class GeometryReport(BaseModel):
     """结构分析 — GET /api/jobs/{id}/geometry（只用坐标判断杂化与螺原子，不依赖键级）"""
     job_id: str
@@ -139,6 +150,7 @@ class GeometryReport(BaseModel):
     formula: str
     sp3: list[GeometryAtom] = Field(default_factory=list, description="sp3 重原子（不含氢）")
     spiro_count: int = 0
+    fragments: list[GeometryFragment] = Field(default_factory=list, description="可整体高亮的挂接片段，按与主体夹角从大到小")
     warnings: list[str] = Field(default_factory=list, description="结构可疑之处；输入结构常见超配位")
 
 
@@ -155,6 +167,6 @@ def normalize_job_row(row: dict) -> dict:
 
 
 __all__ = [
-    "BatchCreate", "BatchItem", "BatchSummary", "GeometryAtom", "GeometryReport", "Job", "JobCreate", "JobListItem",
+    "BatchCreate", "BatchItem", "BatchSummary", "GeometryAtom", "GeometryFragment", "GeometryReport", "Job", "JobCreate", "JobListItem",
     "JobMethod", "JobStatus", "JobTask", "PsiMethod", "normalize_job_row",
 ]

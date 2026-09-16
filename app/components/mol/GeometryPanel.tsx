@@ -43,8 +43,13 @@ export default function GeometryPanel({ jobId, className = "", highlight = [], o
   }
 
   const sp3 = report?.sp3 ?? []
+  const frags = report?.fragments ?? []
   const allHighlighted = sp3.length > 0 && sp3.every((a) => highlight.includes(a.index))
   const toggleAtom = (index: number) => onHighlight?.(highlight.length === 1 && highlight[0] === index ? [] : [index])
+  const sameSet = (a: number[], b: number[]) => a.length === b.length && a.every((x) => b.includes(x))
+  const toggleFragment = (idx: number[]) => onHighlight?.(sameSet(highlight, idx) ? [] : idx)
+  const connText = (f: { kind: string; anchor: number; partner?: number | null }) =>
+    f.kind === "spiro" ? `螺原子 #${f.anchor}` : `单键 #${f.anchor}–#${f.partner}`
 
   return (
     <div className={className}>
@@ -80,6 +85,9 @@ export default function GeometryPanel({ jobId, className = "", highlight = [], o
             <span>
               螺原子 <b className={report.spiro_count ? "text-blue-600" : ""}>{report.spiro_count ?? 0}</b> 个
             </span>
+            <span>
+              可高亮片段 <b>{frags.length}</b> 个
+            </span>
             {(report.warnings?.length ?? 0) > 0 && <span className="text-red-600">结构可疑 {report.warnings?.length} 处</span>}
             {onHighlight && sp3.length > 0 && (
               <button
@@ -91,8 +99,49 @@ export default function GeometryPanel({ jobId, className = "", highlight = [], o
             )}
           </div>
 
+          {frags.length > 0 && (
+            <div className="border-b dark:border-zinc-800">
+              <div className="px-3 py-1 text-zinc-500">挂接片段（点一行在 3D 中整块高亮，按与主体夹角从大到小）</div>
+              <div className="max-h-40 overflow-auto">
+                <table className="w-full">
+                  <thead className="sticky top-0 bg-zinc-50 dark:bg-zinc-950 text-zinc-500">
+                    <tr>
+                      <th className="text-left px-3 py-1 font-normal">片段</th>
+                      <th className="text-right px-2 py-1 font-normal">重原子</th>
+                      <th className="text-right px-2 py-1 font-normal">与主体夹角</th>
+                      <th className="text-left px-3 py-1 font-normal">断开位置</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {frags.map((f, i) => (
+                      <tr
+                        key={i}
+                        onClick={() => toggleFragment(f.indexes ?? [])}
+                        title={onHighlight ? `高亮这 ${f.indexes?.length ?? 0} 个原子` : undefined}
+                        className={`border-t dark:border-zinc-800 ${onHighlight ? "cursor-pointer" : ""} ${
+                          sameSet(highlight, f.indexes ?? []) ? "bg-fuchsia-50 dark:bg-fuchsia-950" : "hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                        }`}
+                      >
+                        <td className="px-3 py-1 font-mono">{f.formula}</td>
+                        <td className="px-2 py-1 text-right">{f.heavy}</td>
+                        <td className="px-2 py-1 text-right font-mono">
+                          {f.tilt_deg != null ? (
+                            <span className={f.tilt_deg >= 60 ? "text-fuchsia-600" : ""}>{f.tilt_deg.toFixed(1)}°</span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="px-3 py-1 text-zinc-500">{connText(f)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {sp3.length === 0 ? (
-            <div className="px-3 py-2 text-zinc-500">未发现 sp3 中心：所有重原子均为平面（sp2）</div>
+            <div className="px-3 py-2 text-zinc-500">未发现 sp3 中心：所有重原子均为平面（sp2）{frags.length > 0 ? "；片段见上表" : ""}</div>
           ) : (
             <div className="max-h-48 overflow-auto">
               <table className="w-full">

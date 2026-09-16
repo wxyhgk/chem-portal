@@ -104,6 +104,17 @@ export interface GeometryAtom {
   neighbors?: string;  // 邻居元素统计，如 C4；默认 
 }
 
+/** 可整体高亮的片段：在螺原子处或非环单键处断开得到的挂接环系 */
+export interface GeometryFragment {
+  kind: "spiro" | "bond";  // 断开位置：螺原子 / 单键
+  anchor: number;  // 片段内与主体相连的原子（1 基）
+  partner?: number | null;  // 主体一侧的原子（单键时）
+  indexes?: number[];  // 片段全部原子（1 基，含 anchor）
+  heavy?: number;  // 重原子数；默认 0
+  formula?: string;  // 默认 
+  tilt_deg?: number | null;  // 与主体平面夹角：0 共面，90 垂直
+}
+
 /** 结构分析 — GET /api/jobs/{id}/geometry（只用坐标判断杂化与螺原子，不依赖键级） */
 export interface GeometryReport {
   job_id: string;
@@ -112,5 +123,6 @@ export interface GeometryReport {
   formula: string;
   sp3?: GeometryAtom[];  // sp3 重原子（不含氢）
   spiro_count?: number;  // 默认 0
+  fragments?: GeometryFragment[];  // 可整体高亮的挂接片段，按与主体夹角从大到小
   warnings?: string[];  // 结构可疑之处；输入结构常见超配位
 }
