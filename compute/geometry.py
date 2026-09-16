@@ -167,6 +167,117 @@ def mark_spiro(atoms: list, max_ring: int = MAX_RING) -> None:
         a.spiro = any(rings[i] & rings[j] == {a.index} for i in range(len(rings)) for j in range(i + 1, len(rings)))
 
 
+@dataclass
+class Fragment:
+    """可从主体上整体切下来的片段（挂着的环系）：在螺原子处或非环单键处断开得到"""
+    kind: str                      # spiro（螺原子处断开）/ bond（单键处断开）
+    anchor: int                    # 片段内与主体相连的原子
+    partner: Optional[int]         # 主体一侧的原子（bond 时）
+    indexes: list                  # 片段全部原子（1 基，含 anchor）
+    heavy: int = 0
+    formula: str = ""
+    tilt_deg: Optional[float] = None  # 片段平面与主体平面夹角：0 共面，90 垂直
+
+
+def _reachable(atoms: list, start: int, blocked_atom: int = 0, blocked_bond: tuple = ()) -> set:
+    seen, stack = {start}, [start]
+    while stack:
+        x = stack.pop()
+        for y in atoms[x - 1].neighbors:
+            if y == blocked_atom or (x, y) == blocked_bond or (y, x) == blocked_bond or y in seen:
+                continue
+            seen.add(y)
+            stack.append(y)
+    return seen
+
+
+def _has_ring(atoms: list, idxs: set) -> bool:
+    """片段内边数 ≥ 点数即含环"""
+    edges = sum(1 for i in idxs for j in atoms[i - 1].neighbors if j in idxs and j > i)
+    return edges >= len(idxs)
+
+
+def _plane_normal(coords):
+    """最小二乘平面法向量（协方差最小特征向量）"""
+    import numpy as np
+
+    pts = np.array(coords, dtype=float)
+    centered = pts - pts.mean(axis=0)
+    _, _, vh = np.linalg.svd(centered, full_matrices=False)
+    return vh[2]
+
+
+def _tilt(atoms: list, frag: set, rest: set) -> Optional[float]:
+    """片段平面与主体平面夹角（度），0 共面 / 90 垂直；原子太少或共线时返回 None"""
+    import numpy as np
+
+    fh = [atoms[i - 1].xyz for i in frag if atoms[i - 1].element != "H"]
+    rh = [atoms[i - 1].xyz for i in rest if atoms[i - 1].element != "H"]
+    if len(fh) < 3 or len(rh) < 3:
+        return None
+    try:
+        n1, n2 = _plane_normal(fh), _plane_normal(rh)
+        cos = abs(float(np.dot(n1, n2)))
+        return round(math.degrees(math.acos(max(-1.0, min(1.0, cos)))), 1)
+    except Exception:
+        return None
+
+
+def fragments(atoms: list, min_heavy: int = 5, max_out: int = 20) -> list:
+    """挂在主体上的整块片段：螺原子处断开的各环系 + 非环单键处断开的较小一侧（需含环，排除甲基/叔丁基等）"""
+    heavy = lambda idxs: sum(1 for i in idxs if atoms[i - 1].element != "H")
+    comp_formula = lambda idxs: formula([atoms[i - 1] for i in idxs])
+    out, seen_keys = [], set()
+
+    def add(kind: str, anchor: int, partner: Optional[int], idxs: set):
+        if heavy(idxs) < min_heavy or not _has_ring(atoms, idxs):
+            return
+        key = frozenset(idxs)
+        if key in seen_keys:
+            return
+        seen_keys.add(key)
+        rest = set(range(1, len(atoms) + 1)) - idxs
+        out.append(
+            Fragment(kind=kind, anchor=anchor, partner=partner, indexes=sorted(idxs), heavy=heavy(idxs),
+                     formula=comp_formula(idxs), tilt_deg=_tilt(atoms, idxs, rest))
+        )
+
+    # 螺原子：去掉它后每个分支各自成片段（含螺原子本身）
+    for a in atoms:
+        if not a.spiro:
+            continue
+        rest_nodes = set(range(1, len(atoms) + 1)) - {a.index}
+        comps = []
+        while rest_nodes:
+            start = next(iter(rest_nodes))
+            comp = _reachable(atoms, start, blocked_atom=a.index)
+            rest_nodes -= comp
+            comps.append(comp)
+        # 最大的一块是分子主体，只把挂在外面的部分算作片段
+        comps.sort(key=heavy, reverse=True)
+        for comp in comps[1:]:
+            add("spiro", a.index, None, comp | {a.index})
+
+    # 桥键（断开后分子分成两块）：取较小一侧
+    for a in atoms:
+        if a.element == "H":
+            continue
+        for b in a.neighbors:
+            if b <= a.index or atoms[b - 1].element == "H":
+                continue
+            side_a = _reachable(atoms, a.index, blocked_bond=(a.index, b))
+            if b in side_a:
+                continue  # 环内的键，断开不分家
+            side_b = set(range(1, len(atoms) + 1)) - side_a
+            if heavy(side_a) <= heavy(side_b):
+                add("bond", a.index, b, side_a)
+            else:
+                add("bond", b, a.index, side_b)
+
+    out.sort(key=lambda f: (-(f.tilt_deg or 0), -f.heavy))
+    return out[:max_out]
+
+
 def analyze(xyz: str, frame: int = -1) -> list:
     """XYZ → [Atom]（已连键、已判杂化、已标螺原子）"""
     atoms = parse_xyz(xyz, frame)

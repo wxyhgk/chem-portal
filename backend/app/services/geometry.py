@@ -1,7 +1,7 @@
 """任务结构分析：取任务的最佳可用结构，交给 compute.geometry 判断 sp3 / 螺原子 / 结构异常"""
 from typing import Optional
 
-from compute.geometry import analyze, formula, ring_sizes_at, sp3_atoms, spiro_list, structure_warnings
+from compute.geometry import analyze, formula, fragments, ring_sizes_at, sp3_atoms, spiro_list, structure_warnings
 
 MAX_ATOMS = 2000  # 连键为 O(n²)，超大体系直接拒绝而不是拖住接口
 
@@ -41,5 +41,17 @@ def report(row: dict) -> Optional[dict]:
             for a in sp3_atoms(atoms)
         ],
         "spiro_count": len(spiro_list(atoms)),
+        "fragments": [
+            {
+                "kind": f.kind,
+                "anchor": f.anchor,
+                "partner": f.partner,
+                "indexes": f.indexes,
+                "heavy": f.heavy,
+                "formula": f.formula,
+                "tilt_deg": f.tilt_deg,
+            }
+            for f in fragments(atoms)
+        ],
         "warnings": structure_warnings(atoms),
     }
