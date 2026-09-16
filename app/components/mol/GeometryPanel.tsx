@@ -9,15 +9,25 @@ const SOURCE_LABEL: Record<string, string> = { result: "优化后结构", progre
 
 const btn = "px-2.5 py-1 rounded-lg border text-xs bg-white dark:bg-zinc-900 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-40"
 
-export default function GeometryPanel({ jobId, className = "" }: { jobId: string; className?: string }) {
+export interface GeometryPanelProps {
+  jobId: string
+  className?: string
+  /** 当前高亮的原子（1 基），由父组件同时传给 MolViewer */
+  highlight?: number[]
+  onHighlight?: (indexes: number[]) => void
+}
+
+export default function GeometryPanel({ jobId, className = "", highlight = [], onHighlight }: GeometryPanelProps) {
   const [report, setReport] = useState<GeometryReport | null>(null)
   const [err, setErr] = useState("")
   const [loading, setLoading] = useState(false)
 
-  // 换任务时收起上一次的结果
+  // 换任务时收起上一次的结果并清掉高亮
   useEffect(() => {
     setReport(null)
     setErr("")
+    onHighlight?.([])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId])
 
   const run = async () => {
@@ -33,11 +43,24 @@ export default function GeometryPanel({ jobId, className = "" }: { jobId: string
   }
 
   const sp3 = report?.sp3 ?? []
+  const allHighlighted = sp3.length > 0 && sp3.every((a) => highlight.includes(a.index))
+  const toggleAtom = (index: number) => onHighlight?.(highlight.length === 1 && highlight[0] === index ? [] : [index])
 
   return (
     <div className={className}>
       <div className="flex items-center gap-2">
-        <button onClick={report ? () => setReport(null) : run} disabled={loading} className={btn}>
+        <button
+          onClick={
+            report
+              ? () => {
+                  setReport(null)
+                  onHighlight?.([])
+                }
+              : run
+          }
+          disabled={loading}
+          className={btn}
+        >
           {loading ? "分析中…" : report ? "收起结构分析" : "🔬 结构分析"}
         </button>
         {err && <span className="text-xs text-red-600">{err}</span>}
@@ -58,6 +81,14 @@ export default function GeometryPanel({ jobId, className = "" }: { jobId: string
               螺原子 <b className={report.spiro_count ? "text-blue-600" : ""}>{report.spiro_count ?? 0}</b> 个
             </span>
             {(report.warnings?.length ?? 0) > 0 && <span className="text-red-600">结构可疑 {report.warnings?.length} 处</span>}
+            {onHighlight && sp3.length > 0 && (
+              <button
+                onClick={() => onHighlight(allHighlighted ? [] : sp3.map((a) => a.index))}
+                className="ml-auto text-blue-600 hover:underline"
+              >
+                {allHighlighted ? "取消高亮" : `在 3D 中高亮全部 ${sp3.length} 个`}
+              </button>
+            )}
           </div>
 
           {sp3.length === 0 ? (
@@ -76,7 +107,14 @@ export default function GeometryPanel({ jobId, className = "" }: { jobId: string
                 </thead>
                 <tbody>
                   {sp3.map((a) => (
-                    <tr key={a.index} className="border-t dark:border-zinc-800">
+                    <tr
+                      key={a.index}
+                      onClick={() => toggleAtom(a.index)}
+                      title={onHighlight ? "点击在 3D 中高亮该原子" : undefined}
+                      className={`border-t dark:border-zinc-800 ${onHighlight ? "cursor-pointer" : ""} ${
+                        highlight.includes(a.index) ? "bg-fuchsia-50 dark:bg-fuchsia-950" : "hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                      }`}
+                    >
                       <td className="px-3 py-1 font-mono">
                         #{a.index} {a.element}
                       </td>

@@ -6,8 +6,14 @@ import { BALL_STICK, bgColor, load3Dmol, type Mol3DLib, type Mol3DViewer } from 
 import { useDarkMode } from "@/lib/hooks/useDarkMode"
 import { parseXyzFrames } from "@/lib/xyz"
 
+const EMPTY: number[] = []
+// 高亮样式：品红大球，和 C 灰 / N 蓝 / B 绿 区分开
+const HIGHLIGHT = { stick: { radius: 0.12 }, sphere: { scale: 0.5, color: "magenta" } }
+
 export interface MolViewerProps {
   xyz: string
+  /** 要高亮的原子序号（1 基，与 XYZ 行号一致）；3Dmol 按 index 选中，切帧仍保留 */
+  highlight?: number[]
   /** full：播放/暂停、重置、速度、帧滑块；compact：播放 + 帧滑块（仅多帧时显示） */
   controls?: "full" | "compact"
   /** 画布容器尺寸类名 */
@@ -18,7 +24,7 @@ export interface MolViewerProps {
 
 const btn = "px-2.5 py-1 rounded-md border text-xs dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-40"
 
-export default function MolViewer({ xyz, controls = "compact", sizeClass = "aspect-[4/3]", emptyText = "无结构", onFramesChange }: MolViewerProps) {
+export default function MolViewer({ xyz, highlight = EMPTY, controls = "compact", sizeClass = "aspect-[4/3]", emptyText = "无结构", onFramesChange }: MolViewerProps) {
   const dark = useDarkMode()
   const elRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<Mol3DViewer | null>(null)
@@ -28,6 +34,8 @@ export default function MolViewer({ xyz, controls = "compact", sizeClass = "aspe
   darkRef.current = dark
   const framesCb = useRef(onFramesChange)
   framesCb.current = onFramesChange
+  const highlightRef = useRef<number[]>(highlight)
+  highlightRef.current = highlight
   const [ready, setReady] = useState(false)
   const [err, setErr] = useState("")
   const [frames, setFrames] = useState(1)
@@ -90,6 +98,21 @@ export default function MolViewer({ xyz, controls = "compact", sizeClass = "aspe
     }
   }, [dark, ready])
 
+  /** 全体球棍 + 高亮原子单独换样式（3Dmol 的 index 为 0 基） */
+  const applyStyle = (v: Mol3DViewer) => {
+    v.setStyle({}, BALL_STICK)
+    const sel = highlightRef.current.map((i) => i - 1).filter((i) => i >= 0)
+    if (sel.length) v.setStyle({ index: sel }, HIGHLIGHT)
+  }
+
+  useEffect(() => {
+    const v = viewerRef.current
+    if (!ready || !v || !lastXyzRef.current) return
+    applyStyle(v)
+    v.render()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlight, ready])
+
   const showFrame = (n: number) => {
     try {
       viewerRef.current?.setFrame(n)
@@ -117,7 +140,7 @@ export default function MolViewer({ xyz, controls = "compact", sizeClass = "aspe
       if (xyz.trim()) {
         if (v.addModelsAsFrames) v.addModelsAsFrames(xyz, "xyz")
         else v.addModel(xyz, "xyz")
-        v.setStyle({}, BALL_STICK)
+        applyStyle(v)
       }
       if (!growing) v.zoomTo()
       v.setFrame(target)

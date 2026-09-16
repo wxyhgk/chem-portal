@@ -58,6 +58,7 @@ export default function JobDetailDrawer(p: JobDetailDrawerProps) {
   const [err, setErr] = useState("")
   const [fullLog, setFullLog] = useState(false)
   const [now, setNow] = useState(() => Date.now())
+  const [highlight, setHighlight] = useState<number[]>([])
   const logRef = useRef<HTMLPreElement>(null)
   const listStatus = p.item?.status
 
@@ -206,9 +207,9 @@ export default function JobDetailDrawer(p: JobDetailDrawerProps) {
 
           {err && <div className="text-xs text-red-600">{err}</div>}
 
-          <MolViewer xyz={xyz} controls="compact" emptyText={!job && !err ? "加载中…" : "无结构"} />
+          <MolViewer xyz={xyz} highlight={highlight} controls="compact" emptyText={!job && !err ? "加载中…" : "无结构"} />
 
-          <GeometryPanel jobId={p.jobId} />
+          <GeometryPanel jobId={p.jobId} highlight={highlight} onHighlight={setHighlight} />
 
           <dl className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1.5 text-xs">
             <dt className="text-zinc-500">能量</dt>
