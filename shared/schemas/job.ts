@@ -91,3 +91,26 @@ export interface JobListItem {
   name?: string | null;
   batch_id?: string | null;
 }
+
+/** 结构分析中的一个 sp3 中心 */
+export interface GeometryAtom {
+  index: number;  // 1 基，与 XYZ 行号一致
+  element: string;
+  cn: number;  // 配位数
+  hybrid: string;
+  angle_sum?: number | null;  // 键角和（度）；正四面体约 656.8
+  spiro?: boolean;  // 两个环只共用该原子；默认 False
+  ring_sizes?: number[];  // 经过该原子的各环大小
+  neighbors?: string;  // 邻居元素统计，如 C4；默认 
+}
+
+/** 结构分析 — GET /api/jobs/{id}/geometry（只用坐标判断杂化与螺原子，不依赖键级） */
+export interface GeometryReport {
+  job_id: string;
+  source: "result" | "progress" | "input";  // 分析所用结构：结果/运行中/输入
+  natoms: number;
+  formula: string;
+  sp3?: GeometryAtom[];  // sp3 重原子（不含氢）
+  spiro_count?: number;  // 默认 0
+  warnings?: string[];  // 结构可疑之处；输入结构常见超配位
+}

@@ -10,6 +10,7 @@ import { createdMs } from "@/lib/jobGroups"
 import { downloadText, safeFileBase } from "@/lib/download"
 import { energyUnit, isTerminal } from "@/lib/jobMeta"
 import MolViewer from "@/app/components/mol/MolViewer"
+import GeometryPanel from "@/app/components/mol/GeometryPanel"
 import { StatusBadge, elapsedText } from "@/app/components/jobs/JobBits"
 
 const LOG_TAIL = 3000
@@ -206,6 +207,8 @@ export default function JobDetailDrawer(p: JobDetailDrawerProps) {
           {err && <div className="text-xs text-red-600">{err}</div>}
 
           <MolViewer xyz={xyz} controls="compact" emptyText={!job && !err ? "加载中…" : "无结构"} />
+
+          <GeometryPanel jobId={p.jobId} />
 
           <dl className="grid grid-cols-[auto,1fr] gap-x-4 gap-y-1.5 text-xs">
             <dt className="text-zinc-500">能量</dt>

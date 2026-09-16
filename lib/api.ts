@@ -2,7 +2,7 @@
 // 基地址固定为同源相对路径 /api/*：next.config.mjs rewrite 到只监听本机的后端，middleware.ts 做登录保护
 // 通过 tsconfig paths 别名 @shared/* 与 @/* 可被 app/page.tsx 直接 import
 
-import type { BatchCreate, BatchSummary, Job, JobCreate, JobListItem, JobStatus, JobTask, JobMethod, PsiMethod } from "@shared/schemas/job";
+import type { BatchCreate, BatchSummary, GeometryReport, Job, JobCreate, JobListItem, JobStatus, JobTask, JobMethod, PsiMethod } from "@shared/schemas/job";
 /**
  * 前端请求一律用同源相对路径 /api/*：由 Next 代理到只监听本机的后端（全站登录保护）。
  * 不要让浏览器直连后端（会绕过登录）；服务端代理地址见 next.config.mjs 的 API_INTERNAL_URL。
@@ -115,6 +115,14 @@ export async function createJob(input: JobCreate): Promise<{ id: string; status:
     body: JSON.stringify(input),
   });
   if (!r.ok) throw new Error(`createJob ${r.status}`);
+  return r.json();
+}
+
+/** 结构分析：sp3 中心、螺原子、结构异常（后端按坐标判断，优先用优化后结构） */
+export async function getGeometry(id: string): Promise<GeometryReport> {
+  const r = await fetch(`${API_BASE}/api/jobs/${id}/geometry`, { cache: "no-store" });
+  if (r.status === 404) throw new NotFoundError(`任务 ${id}`);
+  if (!r.ok) throw new Error(`getGeometry ${r.status}: ${(await r.text()).slice(0, 200)}`);
   return r.json();
 }
 
