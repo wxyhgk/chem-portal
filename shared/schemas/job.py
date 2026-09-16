@@ -119,6 +119,29 @@ class JobListItem(BaseModel):
     batch_id: Optional[str] = None
 
 
+class GeometryAtom(BaseModel):
+    """结构分析中的一个 sp3 中心"""
+    index: int = Field(..., description="1 基，与 XYZ 行号一致")
+    element: str
+    cn: int = Field(..., description="配位数")
+    hybrid: str
+    angle_sum: Optional[float] = Field(default=None, description="键角和（度）；正四面体约 656.8")
+    spiro: bool = Field(default=False, description="两个环只共用该原子")
+    ring_sizes: list[int] = Field(default_factory=list, description="经过该原子的各环大小")
+    neighbors: str = Field(default="", description="邻居元素统计，如 C4")
+
+
+class GeometryReport(BaseModel):
+    """结构分析 — GET /api/jobs/{id}/geometry（只用坐标判断杂化与螺原子，不依赖键级）"""
+    job_id: str
+    source: Literal["result", "progress", "input"] = Field(..., description="分析所用结构：结果/运行中/输入")
+    natoms: int
+    formula: str
+    sp3: list[GeometryAtom] = Field(default_factory=list, description="sp3 重原子（不含氢）")
+    spiro_count: int = 0
+    warnings: list[str] = Field(default_factory=list, description="结构可疑之处；输入结构常见超配位")
+
+
 # 兼容 legacy 列名 xyz (旧 DB 可能列名为 xyz 而非 input_xyz)
 def normalize_job_row(row: dict) -> dict:
     """将 DB row 归一化为 Job 字段：xyz -> input_xyz"""
@@ -132,6 +155,6 @@ def normalize_job_row(row: dict) -> dict:
 
 
 __all__ = [
-    "BatchCreate", "BatchItem", "BatchSummary", "Job", "JobCreate", "JobListItem",
+    "BatchCreate", "BatchItem", "BatchSummary", "GeometryAtom", "GeometryReport", "Job", "JobCreate", "JobListItem",
     "JobMethod", "JobStatus", "JobTask", "PsiMethod", "normalize_job_row",
 ]

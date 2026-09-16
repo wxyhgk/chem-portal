@@ -14,7 +14,7 @@ from compute.config import XTB_BIN
 
 from ..core.config import LIST_LIMIT_MAX, MAX_JOBS_LIST
 from ..schemas.job import BatchIn, JobIn
-from ..services import chem, job_service
+from ..services import chem, geometry, job_service
 
 router = APIRouter(prefix="/api", tags=["jobs"])
 
@@ -120,6 +120,21 @@ def job_image(jid: str):
         return Response(content=chem.PLACEHOLDER_SVG, media_type="image/svg+xml", headers={"Cache-Control": "no-store"})
     terminal = row.get("status") in ("done", "failed", "cancelled")
     return Response(content=svg, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=86400" if terminal else "no-store"})
+
+
+@router.get("/jobs/{jid}/geometry")
+def job_geometry(jid: str):
+    """结构分析：sp3 中心、螺原子、结构异常（优先分析优化后结构）"""
+    row = job_service.get_job(jid)
+    if not row:
+        raise HTTPException(404, "job not found")
+    try:
+        rep = geometry.report(row)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    if rep is None:
+        raise HTTPException(422, "该任务没有可分析的坐标")
+    return rep
 
 
 @router.get("/jobs/{jid}")
