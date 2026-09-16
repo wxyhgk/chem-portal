@@ -1,6 +1,6 @@
 # Chem Portal 后端 - 计算化学任务 API
 
-法国 VPS（24 核 / ~122 GB）。前端在 `../chem-portal-web`（Next.js）；浏览器只访问前端，前端把 `/api/*` 代理到本服务。
+单仓：根目录是后端与计算层，`web/` 是 Next.js 前端。浏览器只访问前端，前端把 `/api/*` 代理到本服务（后端只监听本机）。
 
 ## 目录
 - `backend/app/` FastAPI 应用
@@ -11,6 +11,7 @@
 - `shared/schemas/` 前后端共享契约（`job.py` / `job.ts`，前端仓库用 `scripts/sync-shared.sh` 同步）
 - `database/` SQLite 库（`chem.db` 不入 git；`schema.sql` 仅作参考）
 - `scripts/backup_db.sh` 数据库每日备份（systemd `chem-portal-backup.timer`）
+- `web/` Next.js 前端（全站 Basic Auth，`/api/*` 代理到本服务）
 
 ## 运行（systemd）
 - `chem-portal-api.service`：`uvicorn backend.app.main:app --host 127.0.0.1 --port 18081`，`WorkingDirectory` 与 `PYTHONPATH` 为本目录

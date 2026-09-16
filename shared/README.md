@@ -3,14 +3,14 @@
 前后端共享的 Job 类型定义，唯一真实来源。
 
 - `schemas/job.py` — Pydantic 模型，**唯一来源**（后端直接使用：`from shared.schemas.job import JobCreate`）
-- `schemas/job.ts` — TypeScript 类型，**由 job.py 自动生成，不要手改**（前端副本：`chem-portal-web/shared/schemas/job.ts`）
+- `schemas/job.ts` — TypeScript 类型，**由 job.py 自动生成，不要手改**（前端副本：`web/shared/schemas/job.ts`）
 
 修改字段的流程：
 
 ```bash
 # 1. 改 shared/schemas/job.py（docstring / Field(description=...) 会成为 TS 注释）
 python -m scripts.gen_ts            # 2. 生成 job.ts（--check 只检查是否一致）
-cd ../chem-portal-web
+cd web
 bash scripts/sync-shared.sh --to-web   # 3. 同步到前端仓库
 bash scripts/sync-shared.sh --check
 npx tsc --noEmit                        # 4. 前端类型检查
